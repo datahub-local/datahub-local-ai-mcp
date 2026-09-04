@@ -74,6 +74,38 @@ def state_dir() -> str:
     return env("MCP_STATE_DIR", "/tmp/mcp-state")
 
 
+def trino_url() -> str:
+    """Trino's HTTP endpoint. Required, same reasoning as every other backend."""
+    return require_url("TRINO_URL", "Trino")
+
+
+def trino_user() -> str:
+    """The user Trino authorises the statement as.
+
+    A label rather than a credential on a Trino with `access-control.name=file`
+    and no authentication - but not a free-form one: the rules file lists users
+    explicitly with no catch-all, so an unlisted name is denied every statement.
+    Default `mcp`, which is the read-only entry.
+    """
+    return env("TRINO_USER", "mcp")
+
+
+def trino_timeout() -> float:
+    return float(env("TRINO_TIMEOUT_SECONDS", "30"))
+
+
+def semantic_cache_ttl() -> float:
+    """How long warehouse-derived metadata is reused before being re-read.
+
+    Table structure and dimension values change when the pipeline runs, which is
+    daily here, so a short TTL would spend queries to observe nothing. The point
+    of the cache is not speed but blast radius: an expired entry that cannot be
+    refreshed keeps serving the previous answer, so a Trino outage degrades
+    `list_dimensions` rather than failing it.
+    """
+    return float(env("SEMANTIC_CACHE_TTL_SECONDS", "3600"))
+
+
 def config_dir() -> str | None:
     """The mounted config directory, or ``None`` when nothing is mounted.
 

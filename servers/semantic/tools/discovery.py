@@ -6,9 +6,9 @@ or a join path - those are the compiler's, and a model that cannot see them
 cannot reassemble them wrongly.
 
 `describe_metric` names its own source table on purpose. When the model has
-already read that category_spend_eur reads gold.bodega.category_spending, the
-pull toward re-deriving the number in SQL is weaker - that is the §6.2 routing
-rule supported by a value rather than by a prohibition.
+already read which table a metric reads, the pull toward re-deriving the number
+in SQL is weaker - that is the §6.2 routing rule supported by a value rather
+than by a prohibition.
 """
 
 from __future__ import annotations
@@ -39,8 +39,9 @@ Read this before querying a metric you have not used in this conversation.
 
 DIMENSIONS_DESCRIPTION = """
 The dimensions available for one metric, with sample values where known. Use it
-to get filter values exactly right - values are stored trimmed and UPPERCASED,
-so "Leche Entera" matches nothing and "LECHE ENTERA" matches.
+to get filter values exactly right: a filter must match a stored value
+character for character, including its case, or it matches no rows at all.
+Copy a value from this tool rather than typing one.
 """
 
 EXPLAIN_DESCRIPTION = """
@@ -192,23 +193,24 @@ def list_dimensions(metric: str) -> str:
         detail = samples.get(dimension.name)
         lines.append(f"{dimension.name} [{dimension.type}]")
         if detail is None:
-            # Cardinality and samples need the warehouse, so their absence
-            # degrades this tool to names-only rather than failing it.
-            lines.append("  sample values unavailable (not refreshed)")
+            # The warehouse could not be read and nothing was cached, so this
+            # degrades to names-only rather than failing.
+            lines.append("  sample values unavailable")
         else:
-            # `display` is the pre-trimmed slice; `values` is the full match set,
-            # which for description_clean is hundreds of names and would eat the
-            # whole budget if printed.
-            available = detail.get("display") or detail.get("values") or []
+            # `values` is the full match set, which for a high-cardinality
+            # dimension is hundreds of names, so the slice is what reaches the
+            # prompt while the whole set stays available for matching.
+            available = detail.get("values") or []
             cardinality = detail.get("cardinality", "?")
             shown = ", ".join(available[:8]) or "none seen"
             more = " (and more)" if isinstance(cardinality, int) and cardinality > 8 else ""
             lines.append(f"  {cardinality} distinct; e.g. {shown}{more}")
     lines.append("")
-    # Derived from the values themselves, never asserted: `category` is
-    # UPPERCASE and `subcategory` is LLM-written mixed case ("Whole milk"), on
-    # the same model. A blanket "everything is uppercase" line is wrong for one
-    # of them and causes the exact zero-match filter it means to prevent.
+    # Says "as shown above" rather than naming a convention, because two
+    # dimensions on the same model routinely disagree - one UPPERCASE from a
+    # transformation, another in whatever case it was written. A blanket
+    # "everything is uppercase" line is wrong for one of them and causes the
+    # exact zero-match filter it means to prevent.
     lines.append(
         "Filter values must match EXACTLY as shown above, including case. "
         "Copy a value from this list rather than typing one."

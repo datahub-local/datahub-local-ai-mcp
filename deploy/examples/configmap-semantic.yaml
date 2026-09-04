@@ -3,30 +3,17 @@
 #
 # This repository deliberately contains NO real semantic registry. A registry is
 # the opposite of reusable: it names one warehouse's models, columns and
-# business definitions, and it cannot be validated without the dbt project that
-# defines them. The owning repository generates this ConfigMap from its own dbt
-# project and applies it; this file documents the three keys it must produce.
+# business definitions. The owning repository supplies this ConfigMap.
 #
-# Absence differs per key, and the difference is deliberate:
-#
-#   registry.yaml           fatal   - nothing to answer from
-#   manifest.json           fatal   - table names resolve from it, so without it
-#                                     every answer could name a table that does
-#                                     not exist. A server that cannot answer
-#                                     correctly must not answer.
-#   dimension_samples.json  degrades - list_dimensions falls back to names-only
-#                                     and says "sample values unavailable
-#                                     (not refreshed)". Needs a live warehouse,
-#                                     so it is refreshed on its own cadence.
+# ONE key, and its absence is fatal - there is nothing to answer from without
+# it. Table names, documented columns, cardinality and dimension values are all
+# read from the warehouse instead of mounted, so the deployment must also set
+# TRINO_URL and SEMANTIC_WAREHOUSE_SCOPES. See docs/deployment.md.
 #
 # Mount at /etc/mcp/semantic/ and NOT under /app: WORKDIR is /app and lands on
 # sys.path, so /app/semantic/ shadows the `semantic` package itself and the
 # server dies at startup with "module 'semantic' has no attribute 'register'".
 # Verified by running the container both ways.
-#
-# Run scripts/prune_manifest.py over dbt's manifest first: a full one is ~671 KB
-# against a 1 MiB ConfigMap limit, and the server reads six fields per model -
-# pruned it is ~3.4 KB and produces byte-identical SQL. Optional, never required.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -86,39 +73,3 @@ data:
           # grain floor is what stops a daily reading being quoted off a
           # denominator too small to mean anything.
           grain_min: week
-
-  # dbt's manifest, pruned. Only these fields are read, per model: name,
-  # resource_type, database, schema, alias, and the KEYS of columns. The column
-  # values are dropped - descriptions and tests are never read.
-  manifest.json: |
-    {
-      "nodes": {
-        "model.example.orders": {
-          "name": "orders",
-          "resource_type": "model",
-          "database": "silver",
-          "schema": "example",
-          "alias": "orders",
-          "columns": {
-            "order_id": {},
-            "order_date": {},
-            "channel": {},
-            "total_amount": {}
-          }
-        }
-      }
-    }
-
-  # Optional. Per-model, per-dimension {cardinality, values}. Filter values must
-  # match a warehouse value exactly, so these are what let the server catch a
-  # near-miss ("mastercard" against "DEBIT MASTERCARD") instead of returning an
-  # empty result the caller reads as zero.
-  dimension_samples.json: |
-    {
-      "orders": {
-        "channel": {
-          "cardinality": 3,
-          "values": ["web", "app", "in-store"]
-        }
-      }
-    }

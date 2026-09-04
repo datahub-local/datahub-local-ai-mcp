@@ -84,9 +84,9 @@ collision breaks pytest collection.
 Then decide, per file, what absence means, and make it explicit:
 
 - **fatal** if answering without it would produce a confidently wrong answer
-  (semantic's manifest: table names come from it);
+  (semantic's registry: there are no metric definitions without it);
 - **degraded** if a section can honestly report itself unavailable
-  (`dimension_samples.json`);
+  (`homelab_facts`' `thresholds.yaml`);
 - and log a WARNING naming the path either way. A silent fallback to defaults
   reads as working.
 

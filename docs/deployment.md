@@ -66,9 +66,12 @@ volumes:
 
 Config is cached at first read, so a ConfigMap update needs a pod restart.
 
-For `semantic`, run [`scripts/prune_manifest.py`](../scripts/prune_manifest.py)
-over dbt's manifest before creating the ConfigMap: 671 KB → 3.4 KB against a
-1 MiB limit, byte-identical SQL. Optional, never required.
+`semantic` mounts only `registry.yaml`; it reads table structure, cardinality
+and dimension values from the warehouse. That needs `TRINO_URL` and
+`SEMANTIC_WAREHOUSE_SCOPES` (comma-separated `catalog.schema` pairs, no
+default), and the dbt project must persist column descriptions into the
+warehouse — a blank description becomes a NULL comment, which the documentation
+gate cannot tell from an undocumented column.
 
 ## Pod requirements
 

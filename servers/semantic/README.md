@@ -50,41 +50,62 @@ A `query` tool that executes is not built. Nothing here reaches a warehouse.
 
 ## Near-miss suggestions, and why no casing rule works
 
-A warehouse may store one column as `trim(upper(...))`, so a filter on
-`"Leche Entera"` matches nothing. But a *derived* column on the same model can be
-LLM-written mixed case (`"Whole milk"`), so **no single casing rule is correct
-even within one query**. Matching is therefore case-folded, and a miss answers
-`did you mean "LECHE ENTERA P6"?` — turning a silent empty result into a
-corrected retry.
+A warehouse may store one column normalised by a transformation
+(`trim(upper(...))`, say), so a filter typed in natural case matches nothing.
+But a *derived* column on the same model can hold whatever case it was written
+in, so **no single casing rule is correct even within one query**. Matching is
+therefore case-folded, and a miss answers `did you mean "<the stored value>"?`
+— turning a silent empty result into a corrected retry.
 
-That needs real values, which is the one thing here that cannot be computed
-offline. They live in the separate `dimension_samples.json`, and their absence
-degrades `list_dimensions` to names-only rather than failing anything.
+That needs real values, which is why they are read from the warehouse rather
+than shipped: it is authoritative about itself and a copy goes stale as soon as
+the pipeline runs. `warehouse.py` caches them with a TTL and serves the last
+good value when the warehouse is unreachable, so an outage costs freshness
+rather than the tool.
 
 ## Data
 
-Three keys at `/etc/mcp/semantic/`, mounted as a ConfigMap. The registry is
-**not** baked into the image: it was, while this server lived beside the dbt
-project that defines it, which made a definition change an image build. Here the
-image is generic and the definitions belong to whichever deployment owns them.
+**One** key at `/etc/mcp/semantic/`, mounted as a ConfigMap:
 
-| Key                      | Absence                                          |
-| ------------------------ | ------------------------------------------------ |
-| `registry.yaml`          | fatal                                            |
-| `manifest.json`          | fatal — table names resolve from it              |
-| `dimension_samples.json` | degrades to names-only                           |
+| Key             | Absence                                            |
+| --------------- | -------------------------------------------------- |
+| `registry.yaml` | fatal — no metric definitions without it           |
+
+The registry is **not** baked into the image: it was, while this server lived
+beside the dbt project that defines it, which made a definition change an image
+build. Here the image is generic and the definitions belong to whichever
+deployment owns them.
+
+Everything else is read from the warehouse, because the warehouse is
+authoritative about itself:
+
+| What                                     | Source                                    |
+| ---------------------------------------- | ----------------------------------------- |
+| table name for each `ref()`              | `information_schema.columns`              |
+| which columns are *documented*           | the same query's `comment`                |
+| cardinality per dimension                | `SHOW STATS` (table metadata, no scan)    |
+| dimension values, for near-miss matching | one grouped query per dimension           |
+
+A pruned dbt manifest and a precomputed sample file used to be mounted
+alongside. Both described the warehouse, so both were a copy that went stale
+when the pipeline ran; they and the prune script are gone.
+
+Two requirements come with that. `SEMANTIC_WAREHOUSE_SCOPES` names the
+`catalog.schema` pairs to read and has **no default** — a registry names models
+by `ref()`, which carries no catalog, so a guess resolves nothing and reports as
+a broken registry rather than a missing setting. And the dbt project must
+persist its column descriptions into the warehouse (`persist_docs` for
+dbt-trino): the documentation gate reads those comments, and a column listed in
+`schema.yml` with a *blank* description persists as a NULL comment, which is
+indistinguishable from undocumented. Every column the registry references needs
+a real description, or the gate silently weakens to "the column exists".
 
 `SEMANTIC_REGISTRY_VERSION` is stamped at deploy time and travels on every
 answer, which is what makes a number in a digest traceable to the definitions
 that produced it.
 
-Loading is cached, so a definition change is a ConfigMap change **plus a
-restart**, not a live reload.
-
-Run [`scripts/prune_manifest.py`](../../scripts/prune_manifest.py) over dbt's
-manifest first: a full one is ~671 KB against a 1 MiB ConfigMap limit, and only
-six fields per model are read. Pruned it is ~3.4 KB and produces byte-identical
-SQL — verified. The server works against either, so pruning is never a
-dependency.
-
-Example: [`deploy/examples/configmap-semantic.yaml`](../../deploy/examples/configmap-semantic.yaml).
+The registry is loaded and validated once, so a definition change is a
+ConfigMap change **plus a restart**, not a live reload. Warehouse reads are
+cached with `SEMANTIC_CACHE_TTL_SECONDS` (default 3600) and a failed refresh
+serves the last good value, so an outage costs freshness rather than the tool.
+Only a cold cache can fail, and it fails loudly.

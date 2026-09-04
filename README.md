@@ -139,7 +139,7 @@ different cluster.
 | Server          | Mount point               | Keys                                                       |
 | --------------- | ------------------------- | ---------------------------------------------------------- |
 | `homelab_facts` | `/etc/mcp/homelab_facts/` | `chronic_alerts.yaml`, `thresholds.yaml`                   |
-| `semantic`      | `/etc/mcp/semantic/`      | `registry.yaml`, `manifest.json`, `dimension_samples.json` |
+| `semantic`      | `/etc/mcp/semantic/`      | `registry.yaml`                                            |
 
 Working examples, verified to load: [`deploy/examples/`](deploy/examples/).
 
@@ -157,8 +157,6 @@ Absence is defined per file, never guessed:
 | `chronic_alerts.yaml`    | WARNING naming the path; no classification, 16 tools still served                          |
 | `thresholds.yaml`        | WARNING naming the path; tools state the threshold as unset                                |
 | `registry.yaml`          | **fatal** — nothing to answer from                                                          |
-| `manifest.json`          | **fatal** — table names resolve from it, so answers could name a table that does not exist  |
-| `dimension_samples.json` | degrades — `list_dimensions` falls back to names-only and says so                           |
 
 A backend URL has **no default**: `PROMETHEUS_URL` and `LOKI_URL` raise a named
 `ConfigError` at first use rather than pointing at one specific homelab's service
@@ -179,7 +177,6 @@ servers/<name>/          one server; exposes register(registry)
 tests/                   runner tests
 tests/<name>/            per-server tests
 deploy/examples/         ConfigMap manifests and documented config copies
-scripts/                 prune_manifest.py
 docs/                    adding-a-server.md, deployment.md
 Dockerfile               one file, parameterised by --build-arg SERVER
 ```

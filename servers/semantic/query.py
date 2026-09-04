@@ -6,11 +6,11 @@ that reaches SQL. Values from a request are bound as parameters; identifiers
 from a request (`order_by`) are allowlisted against the projection.
 
 Near-miss suggestions matter more than they look, and case is not the only
-reason. `description_clean` and `store_name` are `trim(upper(...))` in silver,
-so a model filtering on "Leche Entera" matches nothing - but `subcategory` on
-the same gold model is LLM-written mixed case ("Whole milk"), so no single
-casing rule is correct even within one query. The suggestion is what turns a
-silent empty result into a corrected retry; a rule in a prompt could not.
+reason. A column normalised by a transformation (`trim(upper(...))`, say) only
+matches an upper-cased filter, while a derived column on the same model may
+hold whatever case it was written in - so no single casing rule is correct even
+within one query. The suggestion is what turns a silent empty result into a
+corrected retry; a rule in a prompt could not.
 """
 
 from __future__ import annotations
@@ -206,11 +206,11 @@ def _validate_filter_value(item: Filter, dimension, samples: dict[str, list[str]
     for value in values:
         if not isinstance(value, str) or value in known:
             continue
-        # Case-folded throughout, for exact hits and for fuzzy ones alike. Only
-        # `category` is uppercase here and `subcategory` is LLM-written mixed
-        # case, so upper() is not the rule; and comparing a raw typo against
-        # uppercase values drops a real near-miss ("Mercadonna" against
-        # "MERCADONA") below the cutoff on casing alone.
+        # Case-folded throughout, for exact hits and for fuzzy ones alike.
+        # Dimensions on one model routinely disagree on case, so upper() is not
+        # the rule; and comparing a raw typo against upper-cased values drops a
+        # real near-miss ("Mercadonna" against "MERCADONA") below the cutoff on
+        # casing alone.
         exact = folded.get(value.casefold())
         if exact:
             near = [exact]
@@ -250,7 +250,7 @@ def resolve_window(time_range: TimeRange, today: date | None = None) -> tuple[da
 
     Half-open on purpose: a closed upper bound either drops the last day or
     double-counts a boundary row depending on whether the column is a date or a
-    timestamp, and `invoices` carries both.
+    timestamp, and one model routinely carries both.
     """
     today = today or datetime.now(UTC).date()
 
