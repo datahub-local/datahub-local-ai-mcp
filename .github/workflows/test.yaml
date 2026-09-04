@@ -1,0 +1,71 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --extra dev
+
+      - run: uv run -- ruff check .
+
+      - run: uv run -- pytest -q
+
+      # The manifest is built without binding a port or reaching a backend, so a
+      # tool that fails to register is caught here rather than as a silently
+      # blander agent report. The counts are asserted because a tool lost to a
+      # bad import is otherwise invisible - `--list-tools` would still exit 0.
+      - name: Tool manifests
+        run: |
+          set -euo pipefail
+          expect_tools() {
+            server="$1"; want="$2"
+            got=$(uv run -- python -m mcp_runner --server "$server" --list-tools \
+                  | grep -cE '^[a-z_]+$')
+            echo "$server: $got tool(s)"
+            if [ "$got" -ne "$want" ]; then
+              echo "::error::$server exposed $got tools, expected $want"
+              exit 1
+            fi
+          }
+          expect_tools homelab_facts 16
+          expect_tools semantic 4
+
+  # Every server's image must build, on both architectures. Not pushed - this is
+  # the gate that a Dockerfile change or a new server directory does not break
+  # the build for arm64, which is where the silent failure lives: an image with
+  # no arm64 variant is unschedulable on the Orange Pi nodes and the agent
+  # experiences that as the tool simply not existing.
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server: [homelab_facts, semantic]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.server }}
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            SERVER=${{ matrix.server }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

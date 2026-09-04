@@ -1,0 +1,65 @@
+# The homelab_facts data mount, as a ConfigMap.
+#
+# Both files are judgements about ONE cluster and neither is derivable from the
+# code, which is why they are mounted rather than shipped: whether an alert is
+# noise, and where a reading becomes a finding, differ per deployment. The
+# documented copies in ./homelab_facts/ are this fleet's answers - read their
+# comments before changing a number, then keep them here.
+#
+# Absence is loud but never fatal. With no mount the server logs a WARNING
+# naming the path it tried, then serves all sixteen tools with no
+# classification and no thresholds. Sixteen working tools beat a pod that
+# refuses to start over two missing files.
+#
+#   kubectl create configmap mcp-homelab-facts \
+#     --from-file=chronic_alerts.yaml=deploy/examples/homelab_facts/chronic_alerts.yaml \
+#     --from-file=thresholds.yaml=deploy/examples/homelab_facts/thresholds.yaml \
+#     --dry-run=client -o yaml | kubectl apply -n automation -f -
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-homelab-facts
+  namespace: automation
+data:
+  # Which alerts fire permanently here, and why. Names alert RULES, never
+  # machines - which node is affected comes from the alert's own labels.
+  # `never_suppress` is the half that matters most: an alert that fires forever
+  # AND is genuinely broken must never be folded into the chronic set.
+  chronic_alerts.yaml: |
+    chronic:
+      - name: Watchdog
+        reason: >-
+          An always-firing alert whose purpose is to prove the alerting
+          pipeline works. Its absence is the finding, never its presence.
+      - name: KubeSchedulerDown
+        reason: >-
+          k3s embeds the scheduler in the server process with no separate
+          metrics endpoint, so this can never clear on this distribution.
+      - name: KubeControllerManagerDown
+        reason: >-
+          Same k3s embedding as KubeSchedulerDown.
+
+    never_suppress:
+      - name: NodeClockNotSynchronising
+        reason: >-
+          Fires permanently here AND is a real fault. Listed so it can never be
+          absorbed into the chronic set and hidden indefinitely.
+
+  # Where each tool draws the line between a reading and a finding. Every tool
+  # states the threshold it applied, so a report never implies a judgement the
+  # reader cannot check.
+  thresholds.yaml: |
+    volumes:
+      # Percent USED. The expression is `100 * (1 - available/capacity)`; the
+      # bare ratio is percent FREE and reporting it as fill inverts every
+      # finding - it once called a 2%-used volume "97.9% full".
+      warn_percent: 70
+      critical_percent: 80
+      # Only storage classes where a per-volume percentage is meaningful. NFS
+      # PVCs all report the same shared capacity, so a percentage there is the
+      # share's fill repeated once per claim.
+      storage_classes: ["longhorn", "longhorn-no-replica"]
+
+    nodes:
+      disk_warn_percent: 70
+      disk_critical_percent: 85

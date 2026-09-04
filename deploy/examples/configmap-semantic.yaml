@@ -1,0 +1,124 @@
+# The semantic data mount, as a ConfigMap. STRUCTURE ONLY - the values below are
+# a two-metric toy, not any real deployment's registry.
+#
+# This repository deliberately contains NO real semantic registry. A registry is
+# the opposite of reusable: it names one warehouse's models, columns and
+# business definitions, and it cannot be validated without the dbt project that
+# defines them. The owning repository generates this ConfigMap from its own dbt
+# project and applies it; this file documents the three keys it must produce.
+#
+# Absence differs per key, and the difference is deliberate:
+#
+#   registry.yaml           fatal   - nothing to answer from
+#   manifest.json           fatal   - table names resolve from it, so without it
+#                                     every answer could name a table that does
+#                                     not exist. A server that cannot answer
+#                                     correctly must not answer.
+#   dimension_samples.json  degrades - list_dimensions falls back to names-only
+#                                     and says "sample values unavailable
+#                                     (not refreshed)". Needs a live warehouse,
+#                                     so it is refreshed on its own cadence.
+#
+# Mount at /etc/mcp/semantic/ and NOT under /app: WORKDIR is /app and lands on
+# sys.path, so /app/semantic/ shadows the `semantic` package itself and the
+# server dies at startup with "module 'semantic' has no attribute 'register'".
+# Verified by running the container both ways.
+#
+# Run scripts/prune_manifest.py over dbt's manifest first: a full one is ~671 KB
+# against a 1 MiB ConfigMap limit, and the server reads six fields per model -
+# pruned it is ~3.4 KB and produces byte-identical SQL. Optional, never required.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mcp-semantic
+  namespace: automation
+data:
+  registry.yaml: |
+    semantic_models:
+      - name: orders
+        description: One row per order.
+        model: ref('orders')
+        defaults:
+          agg_time_dimension: order_date
+        entities:
+          - {name: order, type: primary, expr: order_id}
+        dimensions:
+          - name: order_date
+            type: time
+            type_params: {time_granularity: day}
+          - {name: channel, type: categorical}
+        measures:
+          - {name: order_total, agg: sum, expr: total_amount}
+          - {name: order_count, agg: count, expr: order_id}
+
+    # `description`, `excludes` and `owner` are all MANDATORY - the registry
+    # fails to load without them, at boot and in CI both. `excludes` is the
+    # unusual one and the reason the loader is strict: it states what the metric
+    # does NOT count, which is the half a reader assumes wrongly and the half no
+    # column name can convey.
+    metrics:
+      - name: revenue
+        label: Revenue
+        type: simple
+        type_params:
+          measure: order_total
+        meta:
+          description: Total order value in the period.
+          excludes: >-
+            Gross of refunds and cancellations. An order refunded next month
+            still counts in full in the month it was placed.
+          owner: data-team
+
+      - name: avg_order_value
+        label: Average order value
+        type: ratio
+        type_params:
+          numerator: order_total
+          denominator: order_count
+        meta:
+          description: Mean order value across orders in the period.
+          excludes: >-
+            Unweighted mean over orders, not over items. One large order moves
+            it as much as many small ones.
+          owner: data-team
+          # A ratio is compiled as `sum(...) / nullif(count(...), 0)`, so an
+          # empty period yields NULL rather than a divide-by-zero error. The
+          # grain floor is what stops a daily reading being quoted off a
+          # denominator too small to mean anything.
+          grain_min: week
+
+  # dbt's manifest, pruned. Only these fields are read, per model: name,
+  # resource_type, database, schema, alias, and the KEYS of columns. The column
+  # values are dropped - descriptions and tests are never read.
+  manifest.json: |
+    {
+      "nodes": {
+        "model.example.orders": {
+          "name": "orders",
+          "resource_type": "model",
+          "database": "silver",
+          "schema": "example",
+          "alias": "orders",
+          "columns": {
+            "order_id": {},
+            "order_date": {},
+            "channel": {},
+            "total_amount": {}
+          }
+        }
+      }
+    }
+
+  # Optional. Per-model, per-dimension {cardinality, values}. Filter values must
+  # match a warehouse value exactly, so these are what let the server catch a
+  # near-miss ("mastercard" against "DEBIT MASTERCARD") instead of returning an
+  # empty result the caller reads as zero.
+  dimension_samples.json: |
+    {
+      "orders": {
+        "channel": {
+          "cardinality": 3,
+          "values": ["web", "app", "in-store"]
+        }
+      }
+    }

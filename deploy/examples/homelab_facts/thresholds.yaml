@@ -1,0 +1,103 @@
+# Where each tool draws the line between a reading and a finding.
+#
+# Thresholds are config rather than prompt text so a rule can be changed without
+# reopening a system prompt, and so a test can assert against the same number the
+# tool uses. Every tool states the threshold it applied in its own output, so a
+# report never implies a judgement the reader cannot check.
+
+volumes:
+  # Percent USED. The expression is `100 * (1 - available/capacity)`; the bare
+  # ratio is the percent FREE and reporting it as fill inverts every finding.
+  warn_percent: 70
+  critical_percent: 80
+  # Storage classes where a per-volume percentage is meaningful. All five `nfs`
+  # PVCs report the same shared 1.9 TB capacity, so a percentage there is the
+  # share's fill repeated once per claim.
+  storage_classes: ["longhorn", "longhorn-no-replica"]
+
+nodes:
+  disk_warn_percent: 70
+  disk_critical_percent: 85
+  # Percentage of the last five minutes tasks spent stalled. Sustained IO stall
+  # is the classic dying-or-overloaded-disk symptom.
+  io_stall_warn_percent: 10
+  cpu_stall_warn_percent: 40
+  temperature_warn_celsius: 75
+  temperature_critical_celsius: 85
+  # A `1` in node_reboot_required means a patch is installed but not running,
+  # which is the worst of both states.
+  security_updates_warn: 1
+  # The apt counts are only as fresh as the last cache refresh, so an old
+  # timestamp makes a `0` meaningless rather than good.
+  apt_cache_stale_days: 7
+
+postgres:
+  # `increase(cnpg_pg_stat_archiver_failed_count[1h])` above this is a finding.
+  # The raw counter is NOT: a lifetime total of 2 whose last failure is 5.4 days
+  # old, against a success 95 seconds ago, is healthy, and reading it as a state
+  # paged CRITICAL "recovery is silently broken" on every run for days.
+  archiver_failure_increase_warn: 1
+  # Seconds since the last successful archive.
+  archiver_stale_warn_seconds: 3600
+  backends_warn: 80
+  backends_waiting_warn: 5
+
+cache:
+  # This Valkey has NO ceiling configured: `maxmemory` is unset, which the
+  # exporter publishes as `redis_memory_max_bytes` = 0, and the container has no
+  # memory limit either. So there is no percentage to compute and dividing by
+  # that zero produced "unable to determine" every run, forever. The reading is
+  # used bytes plus their trend, and evictions as the direct measurement of the
+  # thing a ceiling would have told you about.
+  eviction_increase_warn: 1
+
+lifecycle:
+  # cert-manager Certificates and token Secrets inside this window are findings.
+  cert_expiry_warn_days: 21
+  # A backup system that stopped is worse than one that never existed, because
+  # everybody assumes it is working.
+  backup_stale_warn_hours: 26
+  # Jobs and Pods finished longer ago than this are accumulation.
+  completed_age_warn_days: 7
+
+object_store:
+  # Garage's metadata volume is 500Mi of longhorn against a data volume on the
+  # shared 1.9 TB nfs share, and it is the one that stops the store: an object
+  # whose metadata cannot be recorded cannot be written, however much room the
+  # data volume has. Percent USED, same inversion rule as `volumes`.
+  metadata_warn_percent: 70
+  metadata_critical_percent: 85
+  data_warn_percent: 70
+  data_critical_percent: 85
+  # `increase(api_s3_error_counter[1h])`. The lifetime total is not a state, and
+  # the tool never shows it - same rule as the Postgres archiver.
+  s3_error_increase_warn: 1
+  # Blocks Garage could not re-replicate. A gauge, so the value IS the state,
+  # and with a replication factor of 1 it is data already at risk.
+  resync_errored_blocks_warn: 1
+
+streams:
+  disk_warn_percent: 70
+  disk_critical_percent: 85
+  # Gauges. Any non-zero is the finding; there is no window to take.
+  unavailable_partitions_warn: 1
+  under_replicated_warn: 1
+  # `increase(redpanda_raft_leadership_changes[1h])` - a counter despite
+  # carrying no `_total` suffix. Some churn is ordinary; sustained churn means
+  # brokers are losing contact with each other rather than that traffic is high.
+  leadership_change_increase_warn: 10
+  rpc_error_increase_warn: 1
+
+metrics_store:
+  # Held history as a fraction of configured retention. Below this is only a
+  # finding once the server has been up long enough to have kept more - a store
+  # that restarted yesterday is filling, not losing, and judging it against the
+  # configured window alone would fire every run for a month after any restart.
+  retention_held_warn_ratio: 0.9
+  # Percent USED of the size-based retention limit. Hitting it costs history
+  # rather than writes: the oldest blocks go and ingest continues.
+  size_warn_percent: 70
+  size_critical_percent: 85
+  # Every reading in this fleet is served by this store, so a down scrape target
+  # is a hole in some other tool's answer rather than a healthy zero.
+  targets_down_warn: 1

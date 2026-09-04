@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "datahub-local-ai-mcp"
+version = "0.1.0"
+description = "A platform for MCP servers: one shared runner, one directory per server"
+requires-python = ">=3.13"
+
+# Dependencies are the union across every server, because one image per server
+# is a COPY difference and not a dependency difference — a server-specific
+# extra would mean a per-server lock and a per-server sync, and the whole set
+# is four packages. `httpx` reaches Prometheus, Loki and Garage over plain
+# HTTP; `kubernetes` goes through the pod ServiceAccount. No database DSN, no
+# ArgoCD token, no Grafana credential: ArgoCD state comes from `Application`
+# custom resources and Postgres state from CloudNativePG's metrics.
+dependencies = [
+  "httpx>=0.27",
+  "kubernetes>=30.0.0",
+  "pyyaml>=6",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "respx>=0.21"]
+
+# `servers` alongside `src` is what makes `--server <name>` a plain import:
+# every directory under servers/ becomes a top-level package, so discovery is
+# importlib and never a path walk. Adding a server adds no packaging config.
+[tool.setuptools.packages.find]
+where = ["src", "servers"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+ignore = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "--tb=short"

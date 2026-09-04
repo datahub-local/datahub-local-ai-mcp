@@ -1,0 +1,55 @@
+# Alerts that fire permanently in this cluster, with the reason.
+#
+# This is the one file that is genuinely a judgement call rather than a fact
+# about the hardware, which is why it is config while node names and hardware
+# classes are not: whether an alert is noise cannot be read off the cluster. It
+# names alert *rules*, which are stable, and never machines - which node is
+# affected always comes from the alert's own labels.
+#
+# Most alerts here fire forever, and a 4B model cannot deduce which. The set used
+# to live in `sre-sentinel`'s memory seeds, where it was neither reviewable nor
+# testable; it is config now, and `alerts_snapshot()` labels each firing alert
+# `new`, `chronic` or `still-firing` in code.
+#
+# A chronic alert is *classified*, never suppressed. It still appears in the
+# snapshot with its reason, because "the chronic set is unchanged" is a real
+# reading and a chronic alert that stops firing is worth seeing.
+
+chronic:
+  - name: Watchdog
+    reason: >-
+      Fires by design. It is the always-firing alert that proves the alerting
+      pipeline itself is alive; its absence is the finding.
+
+  - name: InfoInhibitor
+    reason: >-
+      A kube-prometheus-stack meta-alert whose only job is to inhibit info-level
+      alerts when a more serious one fires. Not a condition.
+
+  - name: KubeSchedulerDown
+    reason: >-
+      A k3s artifact. k3s embeds the scheduler in the server process with no
+      separate metrics endpoint, so the scrape target does not exist and cannot
+      come up. Not firing as of 2026-08-25, but kept: it returns whenever the
+      rule is re-enabled, and it is not a real condition when it does.
+
+  - name: KubeControllerManagerDown
+    reason: >-
+      Same k3s artifact as KubeSchedulerDown - the controller-manager is embedded
+      with no separate metrics endpoint.
+
+  - name: CPUThrottlingHigh
+    reason: >-
+      Chronic across many workloads here. These are CPU limits set deliberately
+      tight on small hardware; throttling is the limit working, not a fault.
+
+# Alerts that look chronic because they are always firing, but are REAL and must
+# never be classified as chronic. Listed separately so the distinction is
+# explicit rather than resting on absence from the list above.
+never_suppress:
+  - name: NodeClockNotSynchronising
+    reason: >-
+      A real fault wherever it fires - the node's time sync service is not
+      running. It fires permanently because nobody has fixed it, which is
+      exactly the case a chronic list must not absorb. Which nodes are affected
+      comes from the alert labels, not from this file.
