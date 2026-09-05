@@ -1,6 +1,6 @@
 # semantic
 
-Metric definitions, and the SQL that computes them. Four tools, no execution.
+Metric definitions, and the SQL that computes them. Five tools.
 
 Raw SQL is the wrong contract for an *analytical* question and the right one for
 a structural question — which is why both paths exist and neither replaces the

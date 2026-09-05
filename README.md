@@ -8,7 +8,7 @@ Two servers ship today:
 | Server          | Tools | What it answers                                            | Data it needs mounted               |
 | --------------- | ----- | ---------------------------------------------------------- | ----------------------------------- |
 | `homelab_facts` | 16    | Cluster state: alerts, nodes, volumes, stores, certs, logs | chronic alerts + thresholds         |
-| `semantic`      | 4     | Metric definitions, and the SQL that computes them         | registry + dbt manifest (+ samples) |
+| `semantic`      | 5     | Metric definitions, and the SQL that computes them         | registry + dbt manifest (+ samples) |
 
 ## Why this exists
 

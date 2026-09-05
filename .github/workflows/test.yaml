@@ -40,7 +40,7 @@ jobs:
             fi
           }
           expect_tools homelab_facts 16
-          expect_tools semantic 4
+          expect_tools semantic 5
 
   # Every server's image must build, on both architectures. Not pushed - this is
   # the gate that a Dockerfile change or a new server directory does not break
@@ -48,6 +48,7 @@ jobs:
   # no arm64 variant is unschedulable on the Orange Pi nodes and the agent
   # experiences that as the tool simply not existing.
   build:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
