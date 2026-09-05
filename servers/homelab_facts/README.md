@@ -24,6 +24,8 @@ marks around a JSON string are not part of the value.
 | `metrics_store_health()`             | Prometheus's own store: history held against configured **and against uptime**, size against limit, active series, WAL and compaction integrity, dark scrape targets                          |
 | `cert_expiry()`, `backup_freshness()`| dates turned into days and ages, hundreds of backup objects summarised per schedule                                                                                                          |
 | `argocd_drift()`                     | sync/health state plus a consecutive-run counter                                                                                                                                             |
+| `top_services()`                     | HTTP services ranked by request rate with each one's 5xx share — the `rate()` window applied server-side, grouped on the label the scrape *relabelled it to*, and the router hash stripped so a name is stable between runs |
+| `workload_readiness()`               | every Deployment, StatefulSet and DaemonSet with fewer ready pods than it wants, each comparison carrying the explicit `on()` join without which the label sets miss and everything reads healthy |
 | `promql(expr)`                       | arbitrary Prometheus, with the datasource, the time and the query type supplied server-side                                                                                                  |
 
 They do **not** replace reach. A caller keeps its raw `k8s_*` tools for following
@@ -64,3 +66,29 @@ Documented copies of this fleet's own answers: [`deploy/examples/homelab_facts/`
 `PROMETHEUS_URL` and `LOKI_URL` are **required** and have no default — see
 [`docs/deployment.md`](../../docs/deployment.md). Garage is optional: with no
 token the bucket section reports itself `unavailable` and nothing else changes.
+
+## The ingress controller
+
+`top_services()` names no controller. Which counter carries requests, and which
+label on it carries the backend name, are both **required** with no default:
+
+| Variable                        | Required | Example                                          |
+| ------------------------------- | -------- | ------------------------------------------------ |
+| `INGRESS_REQUESTS_METRIC`       | yes      | `traefik_service_requests_total`, `nginx_ingress_controller_requests` |
+| `INGRESS_SERVICE_LABEL`         | yes      | `exported_service`, `service`                    |
+| `INGRESS_STATUS_LABEL`          | no       | `code` (default), `status`                       |
+| `INGRESS_SERVICE_STRIP_PATTERN` | no       | `-[0-9a-f]{16,}@[a-z]+$`                         |
+
+The label is required rather than derived because it is not guessable even
+knowing the controller. A ServiceMonitor that already owns `service` makes
+Prometheus relabel the exporter's own to `exported_service` — and grouping on
+the wrong one **succeeds**, returning a single plausible row carrying the whole
+fleet's traffic under the scrape job's name. Verified: the same query answered
+`22 services` on the right label and `1 service, traefik-metrics` on the wrong
+one, with no error on either.
+
+`INGRESS_SERVICE_STRIP_PATTERN` is cosmetic but not pointless: a Traefik router
+name ends in a config hash that changes whenever the route is edited, so an
+untrimmed name reads as a *new* service on the next run and breaks any
+comparison a caller makes against its own memory. An invalid pattern is logged
+and ignored rather than fatal.

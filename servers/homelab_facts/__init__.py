@@ -22,6 +22,7 @@ from .tools import (
     nodes,
     raw,
     stores,
+    traffic,
     volumes,
 )
 
@@ -131,6 +132,20 @@ def register(registry: Registry) -> None:
         gitops.argocd_drift,
         schema=gitops.SCHEMA,
         budget=gitops.BUDGET,
+    )
+    registry.add(
+        "top_services",
+        traffic.DESCRIPTION,
+        traffic.top_services,
+        schema=traffic.SCHEMA,
+        budget=traffic.BUDGET,
+    )
+    registry.add(
+        "workload_readiness",
+        traffic.READINESS_DESCRIPTION,
+        traffic.workload_readiness,
+        schema=traffic.READINESS_SCHEMA,
+        budget=traffic.READINESS_BUDGET,
     )
     registry.add(
         "promql",
