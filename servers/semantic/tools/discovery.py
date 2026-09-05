@@ -222,7 +222,7 @@ def explain(**payload) -> str:
     registry = settings.registry()
     try:
         query = parse(payload)
-        validate(query, registry, settings.sample_values(_model_of(payload, registry)))
+        validate(query, registry, settings.sample_values(model_of(payload, registry)))
         compiled = compile_query(query, registry)
     except QueryError as exc:
         return f"INVALID: {exc}"
@@ -242,7 +242,7 @@ def explain(**payload) -> str:
     return truncate_lines(lines, EXPLAIN_BUDGET, unit="lines")
 
 
-def _model_of(payload: dict, registry) -> str:
+def model_of(payload: dict, registry) -> str:
     names = payload.get("metrics") or []
     first = names[0] if isinstance(names, list) and names else names
     metric = registry.metrics.get(first) if isinstance(first, str) else None

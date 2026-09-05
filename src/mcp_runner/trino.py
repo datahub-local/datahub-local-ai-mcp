@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
+from datetime import date
+from urllib.parse import quote
 
 import httpx
 
@@ -41,6 +44,28 @@ def _identifier(part: str) -> str:
     return part
 
 
+def _param_literal(value: object) -> str:
+    """One value in an `EXECUTE ... USING` list.
+
+    Trino parses these against a statement it has already planned, so a value
+    lands in the parameter slot it was bound to and cannot alter the query's
+    shape. Only the types the compiler produces are accepted - an unexpected
+    type is a compiler bug, and rendering it via `str()` is how a value would
+    quietly become something else.
+    """
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, date):
+        return f"DATE '{value.isoformat()}'"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        return "'" + value.replace("'", "''") + "'"
+    raise TrinoError(f"refusing to bind {type(value).__name__} parameter {value!r}")
+
+
 def qualified(table: str) -> str:
     """`catalog.schema.table`, each part checked."""
     parts = table.split(".")
@@ -56,17 +81,49 @@ class Trino:
         self.timeout = timeout if timeout is not None else config.trino_timeout()
 
     def query(self, sql: str) -> list[list]:
-        """Run one statement and drain every page.
+        """Run one statement and drain every page."""
+        return self._run(sql, {"X-Trino-User": self.user, "Content-Type": "text/plain"})
 
-        Trino answers a POST with a `nextUri` and returns rows across however
-        many pages it likes, so a client that reads only the first response gets
-        an empty result for a perfectly good query.
+    def execute(self, sql: str, params: Sequence[object]) -> list[list]:
+        """Run a `?`-placeholder statement with its values genuinely bound.
+
+        Trino's HTTP protocol has no inline bind parameters, so the statement
+        travels as an `X-Trino-Prepared-Statement` header and the body becomes
+        `EXECUTE <name> USING <literals>`. The values are still parsed as a
+        parameter list against an already-planned statement, so a value cannot
+        become SQL structure the way an interpolated one can.
+
+        This is the only path that executes compiler output. The compiler's
+        `inline_sql` renders the same statement for display and must never be
+        sent here - that is what keeps one rendering out of the injection path.
         """
-        headers = {"X-Trino-User": self.user, "Content-Type": "text/plain"}
+        if not params:
+            return self.query(sql)
+
+        name = "semantic_query"
+        headers = {
+            "X-Trino-User": self.user,
+            "Content-Type": "text/plain",
+            # Percent-encoded: a prepared statement travels in an HTTP header,
+            # and a raw newline or non-ASCII byte in one is a protocol error
+            # rather than a query error.
+            "X-Trino-Prepared-Statement": f"{name}={quote(sql, safe='')}",
+        }
+        using = ", ".join(_param_literal(value) for value in params)
+        return self._run(f"EXECUTE {name} USING {using}", headers)
+
+    def _run(self, body: str, headers: dict[str, str]) -> list[list]:
+        """POST one statement and follow `nextUri` to the end.
+
+        Trino returns rows across however many pages it likes, so a client that
+        reads only the first response gets an empty result for a good query.
+        """
         rows: list[list] = []
         with httpx.Client(timeout=self.timeout) as client:
             try:
-                response = client.post(f"{self.url}/v1/statement", content=sql.encode(), headers=headers)
+                response = client.post(
+                    f"{self.url}/v1/statement", content=body.encode(), headers=headers
+                )
                 response.raise_for_status()
                 payload = response.json()
                 while True:

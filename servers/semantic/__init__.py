@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from mcp_runner.server import Registry
 
-from .tools import discovery
+from .tools import discovery, execute
 
 
 def register(registry: Registry) -> None:
@@ -50,4 +50,11 @@ def register(registry: Registry) -> None:
         discovery.explain,
         schema=discovery.QUERY_SCHEMA,
         budget=discovery.EXPLAIN_BUDGET,
+    )
+    registry.add(
+        "query",
+        execute.QUERY_DESCRIPTION,
+        execute.query,
+        schema=discovery.QUERY_SCHEMA,
+        budget=execute.QUERY_BUDGET,
     )

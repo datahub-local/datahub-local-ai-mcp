@@ -25,8 +25,17 @@ Structural questions keep going to whatever SQL tools the caller already has.
 | `describe_metric` | `name`           | one metric in full, naming its source table       |
 | `list_dimensions` | `metric`         | dimensions with sampled values                    |
 | `explain`         | a `SemanticQuery`| the compiled SQL and resolved window, **not executed** |
+| `query`           | a `SemanticQuery`| the rows, each metric's `excludes`, and any partial period |
 
-A `query` tool that executes is not built. Nothing here reaches a warehouse.
+`query` is the only tool that reaches the warehouse, and it accepts the same
+argument as `explain` — so a query that explains is a query that runs. Its
+values travel as bound parameters (`PREPARE`/`EXECUTE ... USING`); the SQL that
+`explain` prints is a rendering for display and is never the thing sent.
+
+Its reply budgets rows against what is left after the exclusions, because
+truncation drops from the tail: budgeting the whole reply at once would cut the
+caveats first and return bare numbers, which is the one outcome this layer
+exists to prevent.
 
 ## What the code owns, and therefore cannot get wrong
 

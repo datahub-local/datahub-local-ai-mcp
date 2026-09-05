@@ -1,4 +1,4 @@
-"""The four discovery tools: what they say, and that they stay inside budget.
+"""The discovery tools: what they say, and that they stay inside budget.
 
 Byte budgets are not caution: one ~16KB tool result reproducibly ends a run with
 `terminal turn had empty text`, which delivers nothing at all.
@@ -146,10 +146,16 @@ class TestExplain:
 
 
 class TestRegistration:
-    def test_registers_exactly_the_four_discovery_tools(self):
+    def test_registers_exactly_the_five_tools(self):
         tools = ToolRegistry()
         register(tools)
-        assert set(tools.tools) == {"list_metrics", "describe_metric", "list_dimensions", "explain"}
+        assert set(tools.tools) == {
+            "list_metrics",
+            "describe_metric",
+            "list_dimensions",
+            "explain",
+            "query",
+        }
 
     def test_no_sql_tool_exists(self):
         """Not gated, not approval-wrapped - absent."""
