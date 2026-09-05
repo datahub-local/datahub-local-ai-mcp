@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as _datetime
 import logging
+import unicodedata
 
 from .prometheus import UNAVAILABLE
 
@@ -17,14 +18,22 @@ logger = logging.getLogger(__name__)
 
 # Only ASCII in rendered output: a reply carrying invalid UTF-8 has its result
 # dropped entirely while the run still reports success.
-_ASCII_FALLBACK = {"·": "-", "—": "-", "–": "-", "→": "->", "°": ""}
+_ASCII_FALLBACK = {"·": "-", "—": "-", "–": "-", "→": "->", "°": "", "€": "EUR"}
 
 
 def ascii_only(text: str) -> str:
-    """Fold known non-ASCII to ASCII and drop the rest."""
+    """Fold non-ASCII to ASCII, keeping the letter wherever one exists.
+
+    An accented letter decomposes to its base instead of being dropped. Dropping
+    turned PANALES into PAALES and ATUN into ATN, which read as different
+    products and match nothing when someone searches the real name.
+    """
     for source, replacement in _ASCII_FALLBACK.items():
         text = text.replace(source, replacement)
-    return text.encode("ascii", errors="ignore").decode("ascii")
+    stripped = "".join(
+        c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c)
+    )
+    return stripped.encode("ascii", errors="ignore").decode("ascii")
 
 
 def number(value: float | None, digits: int = 1, suffix: str = "") -> str:
