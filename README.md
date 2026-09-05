@@ -7,7 +7,7 @@ Two servers ship today:
 
 | Server          | Tools | What it answers                                            | Data it needs mounted               |
 | --------------- | ----- | ---------------------------------------------------------- | ----------------------------------- |
-| `homelab_facts` | 16    | Cluster state: alerts, nodes, volumes, stores, certs, logs | chronic alerts + thresholds         |
+| `homelab_facts` | 18    | Cluster state: alerts, nodes, volumes, stores, certs, logs | chronic alerts + thresholds         |
 | `semantic`      | 5     | Metric definitions, and the SQL that computes them         | registry + dbt manifest (+ samples) |
 
 ## Why this exists
@@ -154,7 +154,7 @@ Absence is defined per file, never guessed:
 
 | File                     | Missing means                                                                              |
 | ------------------------ | ------------------------------------------------------------------------------------------ |
-| `chronic_alerts.yaml`    | WARNING naming the path; no classification, 16 tools still served                          |
+| `chronic_alerts.yaml`    | WARNING naming the path; no classification, all tools still served                          |
 | `thresholds.yaml`        | WARNING naming the path; tools state the threshold as unset                                |
 | `registry.yaml`          | **fatal** — nothing to answer from                                                          |
 

@@ -96,9 +96,9 @@ that does not work is worse than none.
 ```bash
 uv sync --extra dev
 uv run -- ruff check .
-uv run -- pytest -q                                          # 380 tests
-uv run -- python -m mcp_runner --server homelab_facts --list-tools   # 16
-uv run -- python -m mcp_runner --server semantic --list-tools        # 5
+uv run -- pytest -q
+uv run -- python -m mcp_runner --server homelab_facts --list-tools
+uv run -- python -m mcp_runner --server semantic --list-tools
 ```
 
 Changing a Dockerfile, a mount path or a degradation path means **running the

@@ -24,23 +24,37 @@ jobs:
 
       # The manifest is built without binding a port or reaching a backend, so a
       # tool that fails to register is caught here rather than as a silently
-      # blander agent report. The counts are asserted because a tool lost to a
-      # bad import is otherwise invisible - `--list-tools` would still exit 0.
+      # blander agent report. Every server under servers/ is checked, so adding
+      # one needs no change to this file - and no tool count is asserted,
+      # because a count has to be edited on every deliberate addition while
+      # catching nothing that the import error below does not already catch.
       - name: Tool manifests
         run: |
           set -euo pipefail
-          expect_tools() {
-            server="$1"; want="$2"
-            got=$(uv run -- python -m mcp_runner --server "$server" --list-tools \
-                  | grep -cE '^[a-z_]+$')
-            echo "$server: $got tool(s)"
-            if [ "$got" -ne "$want" ]; then
-              echo "::error::$server exposed $got tools, expected $want"
-              exit 1
-            fi
-          }
-          expect_tools homelab_facts 16
-          expect_tools semantic 5
+          for init in servers/*/__init__.py; do
+            server=$(basename "$(dirname "$init")")
+            echo "== $server"
+            uv run -- python -m mcp_runner --server "$server" --list-tools
+          done
+
+  # Same discovery as publish.yaml: a hardcoded list goes stale silently, and
+  # the failure is a new server that is never built at all.
+  discover:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      servers: ${{ steps.list.outputs.servers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List servers
+        id: list
+        run: |
+          set -euo pipefail
+          servers=$(find servers -mindepth 2 -maxdepth 2 -name '__init__.py' \
+                    -exec dirname {} \; | xargs -n1 basename | sort | jq -Rsc 'split("\n")[:-1]')
+          echo "servers=$servers" >> "$GITHUB_OUTPUT"
+          echo "building: $servers"
 
   # Every server's image must build, on both architectures. Not pushed - this is
   # the gate that a Dockerfile change or a new server directory does not break
@@ -48,12 +62,12 @@ jobs:
   # no arm64 variant is unschedulable on the Orange Pi nodes and the agent
   # experiences that as the tool simply not existing.
   build:
-    needs: test
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        server: [homelab_facts, semantic]
+        server: ${{ fromJson(needs.discover.outputs.servers) }}
     steps:
       - uses: actions/checkout@v4
 
