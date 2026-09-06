@@ -211,6 +211,21 @@ def top_services() -> str:
     lines += render.table(["service", "rate", "per hour", "5xx"], rows)
     if len(ranked) > _TOP_N:
         lines.append(f"{len(ranked) - _TOP_N} quieter service(s) not shown.")
+
+    idle = [name for name in ranked if rates[name] == 0]
+    lines.append("")
+    if idle:
+        lines.append(
+            f"Routed but took no request in {_WINDOW}: {', '.join(sorted(idle))}."
+        )
+        lines.append(
+            "Idle is not broken. Most of these are dashboards opened occasionally, "
+            "so treat a service as a candidate for removal only if it stays here "
+            "across many runs - never on one reading."
+        )
+    else:
+        lines.append(f"Every routed service took at least one request in {_WINDOW}.")
+
     lines.append(
         "A service missing from this table is not reached through the ingress "
         "controller - internal-only traffic is not counted anywhere here."
@@ -247,6 +262,23 @@ def build_shortfall_expression(ready: str, desired: str, join: str) -> str:
     """Workloads with fewer ready pods than they want. The `on()` join is what
     keeps kube-state-metrics' differing label sets from dropping every row."""
     return f"{ready} < {join} {desired}"
+
+
+_RESTART_WINDOW = "24h"
+
+
+def build_restart_expression(window: str = _RESTART_WINDOW) -> str:
+    """Containers that restarted during the window.
+
+    An `increase()` and never the bare counter: the raw metric is a lifetime
+    total, so a pod that crash-looped once months ago reads identically to one
+    crash-looping now. `> 0` because a fleet at rest should return nothing at
+    all rather than a page of zeroes.
+    """
+    return (
+        "sum by (namespace, pod, container) "
+        f"(increase(kube_pod_container_status_restarts_total[{window}])) > 0"
+    )
 
 
 def workload_readiness() -> str:
@@ -300,6 +332,8 @@ def workload_readiness() -> str:
             "not as a healthy cluster."
         )
 
+    restart_rows, restarts_read = _restarts(prometheus)
+
     lines = [f"Workload readiness across {checked} workload(s)."]
     if failed:
         lines.append(f"Not checked, query failed: {', '.join(failed)}.")
@@ -311,7 +345,46 @@ def workload_readiness() -> str:
         lines += render.table(["kind", "workload", "ready/wanted", "state"], rows)
     else:
         lines.append("Every workload has all of its wanted pods ready.")
+
+    lines.append("")
+    if not restarts_read:
+        lines.append(f"Restarts over {_RESTART_WINDOW}: unavailable, the query failed.")
+    elif restart_rows:
+        lines.append(
+            f"{len(restart_rows)} container(s) restarted in the last {_RESTART_WINDOW}."
+        )
+        lines += render.table(["container", "restarts"], restart_rows)
+    else:
+        lines.append(f"No container restarted in the last {_RESTART_WINDOW}.")
     return truncate_lines(lines, READINESS_BUDGET, unit="workloads")
+
+
+def _restarts(prometheus) -> tuple[list[list[str]], bool]:
+    """Containers restarted in the window, busiest first."""
+    try:
+        series = prometheus.instant(build_restart_expression())
+    except PrometheusError:
+        return [], False
+
+    counted: list[tuple[float, str]] = []
+    for item in series:
+        metric = item.get("metric") or {}
+        namespace = metric.get("namespace")
+        pod = metric.get("pod")
+        container = metric.get("container")
+        if not namespace or not pod:
+            continue
+        try:
+            count = float(item["value"][1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+        name = f"{namespace}/{pod}"
+        if container:
+            name += f" [{container}]"
+        counted.append((count, name))
+
+    counted.sort(key=lambda pair: -pair[0])
+    return [[name, render.number(count, 0)] for count, name in counted[:_TOP_N]], True
 
 
 def _lookup(prometheus, metric: str, label: str, namespace: str, name: str) -> float | None:

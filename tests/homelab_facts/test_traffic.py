@@ -14,6 +14,7 @@ from homelab_facts.tools import traffic
 from homelab_facts.tools.traffic import (
     build_error_expression,
     build_rate_expression,
+    build_restart_expression,
     build_shortfall_expression,
     clean_service,
 )
@@ -145,3 +146,27 @@ class TestNoVendorInTheCode:
         # Named in prose as examples, but never as a value the code falls back to.
         for vendor in ("traefik_service_requests_total", "kubernetescrd", "exported_service"):
             assert f'"{vendor}"' not in source, vendor
+
+
+class TestRestarts:
+    """`kube_pod_container_status_restarts_total` is a lifetime counter. Read
+    bare, a pod that crash-looped once months ago is indistinguishable from one
+    crash-looping now - the archiver-counter mistake in a new place."""
+
+    def test_restarts_are_a_windowed_increase(self):
+        expression = build_restart_expression("24h")
+        assert "increase(kube_pod_container_status_restarts_total[24h])" in expression
+
+    def test_the_bare_counter_is_never_sent(self):
+        expression = build_restart_expression("24h")
+        assert re.findall(r"\w+\[24h\]", expression) == [
+            "kube_pod_container_status_restarts_total[24h]"
+        ]
+
+    def test_only_nonzero_is_returned(self):
+        # A fleet at rest must return nothing, not a page of zeroes for a model
+        # to summarise wrongly.
+        assert build_restart_expression("24h").rstrip().endswith("> 0")
+
+    def test_grouped_to_the_container_that_restarted(self):
+        assert "sum by (namespace, pod, container)" in build_restart_expression("24h")
