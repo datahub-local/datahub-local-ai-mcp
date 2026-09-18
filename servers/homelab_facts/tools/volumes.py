@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 from mcp_runner.prometheus import PrometheusError, used_percent
 
 from .. import settings
 
-BUDGET = 2560
+BUDGET = tool_budget("volume_fill")
 _SNAPSHOT_KEY = "volume_fill"
 
 

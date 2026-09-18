@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 from mcp_runner.prometheus import PrometheusError, increase_
 
 from .. import settings
 
-BUDGET = 3072
+POSTGRES_BUDGET = tool_budget("postgres_health")
+CACHE_BUDGET = tool_budget("cache_health")
 
 # From Prometheus's metadata API, not inferred from names. Anything here must be
 # read through a window; anything absent is a gauge.
@@ -133,7 +135,7 @@ def postgres_health() -> str:
         "is not here. Use the postgres MCP tools for that; this tool reports only "
         "what the operator exports, which needs no database credential."
     )
-    return truncate_lines(lines, BUDGET, unit="lines")
+    return truncate_lines(lines, POSTGRES_BUDGET, unit="lines")
 
 
 def _archiver_verdict(
@@ -228,7 +230,7 @@ def cache_health() -> str:
         else "No evictions in the last hour. A non-zero lifetime total with a zero "
         "increase is not a finding."
     )
-    return truncate_lines(lines, BUDGET, unit="lines")
+    return truncate_lines(lines, CACHE_BUDGET, unit="lines")
 
 
 POSTGRES_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}

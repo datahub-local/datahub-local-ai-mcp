@@ -8,15 +8,16 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 from mcp_runner.prometheus import PrometheusError
 
 from .. import settings
 
 # Smaller than the default: a hand-written query can match thousands of series,
 # and this is the one tool whose result size the caller chooses.
-BUDGET = 3072
+BUDGET = tool_budget("promql")
 
-_MAX_SERIES = 40
+_MAX_SERIES = tool_cap("series")
 
 
 def promql(expr: str, window: str = "") -> str:

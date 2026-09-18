@@ -61,12 +61,15 @@ class TestExclusions:
         assert "grocery_spend_eur:" in out
         assert "shopping_trips:" in out
 
-    def test_exclusions_survive_truncation(self, wired, trino):
+    def test_exclusions_survive_truncation(self, wired, trino, monkeypatch):
         """The one outcome this tool must never produce: numbers with no caveat.
 
         `truncate_lines` drops from the tail, so budgeting the whole reply at
-        once would cut the exclusions first.
+        once would cut the exclusions first. The budget is pinned small so the
+        guard holds whatever `MCP_BUDGET_BYTES` widens the working size to.
         """
+        monkeypatch.setattr(execute, "QUERY_BUDGET", 1024)
+        monkeypatch.setattr(execute, "_MIN_ROW_BUDGET", 256)
         trino.rows = [[f"2026-{month:02d}-01", 1000.0 + month] for month in range(1, 13)] * 40
         out = _query()
         assert "EXCLUDES" in out

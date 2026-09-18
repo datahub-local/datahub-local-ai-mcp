@@ -11,7 +11,7 @@ from datetime import date
 
 import pytest
 from semantic import registry as registry_module
-from semantic.query import QueryError, parse, resolve_window, validate
+from semantic.query import MAX_LIMIT, MAX_METRICS, QueryError, parse, resolve_window, validate
 from semantic.registry import RegistryError, validate_registry
 
 
@@ -155,12 +155,23 @@ class TestQueryShape:
             parse({"metrics": [], "time_range": {"grain": "day", "last": "7 days"}})
 
     def test_too_many_metrics_is_rejected(self):
-        with pytest.raises(QueryError, match="at most 5"):
-            parse({"metrics": ["a"] * 6, "time_range": {"grain": "day", "last": "7 days"}})
+        with pytest.raises(QueryError, match=f"at most {MAX_METRICS}"):
+            parse(
+                {
+                    "metrics": ["a"] * (MAX_METRICS + 1),
+                    "time_range": {"grain": "day", "last": "7 days"},
+                }
+            )
 
     def test_limit_above_the_cap_is_rejected(self):
-        with pytest.raises(QueryError, match="between 1 and 1000"):
-            parse({"metrics": ["a"], "time_range": {"grain": "day", "last": "7 days"}, "limit": 5000})
+        with pytest.raises(QueryError, match=f"between 1 and {MAX_LIMIT}"):
+            parse(
+                {
+                    "metrics": ["a"],
+                    "time_range": {"grain": "day", "last": "7 days"},
+                    "limit": MAX_LIMIT + 1,
+                }
+            )
 
     def test_unknown_op_is_rejected(self):
         with pytest.raises(QueryError, match="is not one of"):

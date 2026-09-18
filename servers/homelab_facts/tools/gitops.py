@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 
 from .. import settings
 
-BUDGET = 2560
+BUDGET = tool_budget("argocd_drift")
 _SNAPSHOT_KEY = "argocd_drift"
 
 _HEALTHY = "Healthy"
@@ -21,7 +22,7 @@ _SYNCED = "Synced"
 
 # Enough to point at the problem, bounded so one broken app cannot blow the
 # budget.
-_MAX_RESOURCES = 6
+_MAX_RESOURCES = tool_cap("resources")
 
 
 def argocd_drift() -> str:

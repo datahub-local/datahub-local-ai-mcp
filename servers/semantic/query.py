@@ -20,15 +20,17 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+from mcp_runner.config import tool_cap
+
 from .registry import GRAINS, Registry, grain_at_least
 
 OPS = ("=", "!=", "in", "not_in", ">", ">=", "<", "<=", "contains")
 _SET_OPS = frozenset({"in", "not_in"})
 _ORDERED_OPS = frozenset({">", ">=", "<", "<="})
 
-MAX_METRICS = 5
-MAX_LIMIT = 1000
-DEFAULT_LIMIT = 200
+MAX_METRICS = tool_cap("metrics")
+MAX_LIMIT = tool_cap("limit")
+DEFAULT_LIMIT = tool_cap("default_limit")
 
 
 class QueryError(Exception):

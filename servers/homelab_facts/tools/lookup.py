@@ -20,10 +20,11 @@ from dataclasses import dataclass
 
 from mcp_runner import kube, render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 
 from .. import settings
 
-BUDGET = 3072
+BUDGET = tool_budget("find_object")
 
 # Per kind, so one noisy kind cannot crowd out the kind that answers. Rows are
 # newest first: for a repeating Job the recent run is the one being asked about.
@@ -32,7 +33,7 @@ _PER_KIND = 6
 # Services whose endpoints are worth a second call. A Service with no ready
 # endpoint is exactly what `curl: (7) could not connect` means, and it is the
 # finding that incident needed.
-_MAX_ENDPOINT_CHECKS = 4
+_MAX_ENDPOINT_CHECKS = tool_cap("endpoint_checks")
 
 # Searched in the order a question tends to name them. Secrets and ConfigMaps are
 # absent deliberately: `kube.list` strips a Secret's payload, but a name search

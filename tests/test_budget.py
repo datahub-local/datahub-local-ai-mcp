@@ -1,20 +1,59 @@
 """The byte budget, which is a hard requirement rather than a nicety.
 
-A single ~16 KB tool result reproducibly ends a run with no report at all: four
-calls for 24,126 result bytes produced `terminal turn had empty text`, where five
-calls for 8,483 bytes the same day wrote a normal report. Cumulative input was
-25,423 tokens against a 65,536 window, so this is not context overflow - a 4B
-model stops producing a final turn when one answer is that large.
+A single ~16 KB tool result reproducibly ended a run with no report at all under
+a 4B model: four calls for 24,126 result bytes produced `terminal turn had empty
+text`, where five calls for 8,483 bytes the same day wrote a normal report. That
+model is no longer in use, so the working size is now `MCP_BUDGET_BYTES` and the
+per-tool budgets scale with it - but an answer still has to be bounded in code.
 """
 
 from __future__ import annotations
 
+import pytest
+
 from mcp_runner.budget import DEFAULT_BUDGET_BYTES, clamp, truncate_lines
+from mcp_runner.config import (
+    BUDGET_REFERENCE_BYTES,
+    ConfigError,
+    scaled_budget,
+    tool_budget,
+    tool_cap,
+)
 
 
-def test_default_budget_is_well_under_the_size_that_kills_a_run():
-    # 16 KB killed a run; 8,483 bytes did not. The default must sit below both.
-    assert DEFAULT_BUDGET_BYTES < 8483
+def test_scaled_widens_every_tool_budget_by_the_same_factor():
+    # The relative shape of the hand-tuned budgets survives a change of size.
+    assert scaled_budget(BUDGET_REFERENCE_BYTES) == DEFAULT_BUDGET_BYTES
+    assert scaled_budget(1024) == DEFAULT_BUDGET_BYTES // 4
+
+
+def test_a_tool_budget_defaults_to_the_scaled_hand_tuned_value():
+    assert tool_budget("logs") == scaled_budget(4096)
+    assert tool_budget("explain") == scaled_budget(2048)
+
+
+def test_a_tool_budget_can_be_overridden_by_its_own_env(monkeypatch):
+    # Named after the registered tool, and absolute: what it asks for is what the
+    # tool gets, whatever the global working size is.
+    monkeypatch.setenv("MCP_BUDGET_LOGS", "9999")
+    assert tool_budget("logs") == 9999
+    assert tool_budget("why_failed") == scaled_budget(4096)
+
+
+def test_caps_grow_with_the_budget_so_a_wider_answer_is_not_left_capped():
+    # A wider byte budget is useless if the tool still gathers the old small list.
+    assert tool_cap("series") == scaled_budget(40)
+    assert tool_cap("limit") == scaled_budget(1000)
+
+
+def test_a_cap_can_be_overridden_by_its_own_env(monkeypatch):
+    monkeypatch.setenv("MCP_MAX_SERIES", "7")
+    assert tool_cap("series") == 7
+
+
+def test_an_unknown_tool_says_where_to_add_its_default():
+    with pytest.raises(ConfigError, match="add it to config.py"):
+        tool_budget("no_such_tool")
 
 
 def test_short_input_is_returned_whole():

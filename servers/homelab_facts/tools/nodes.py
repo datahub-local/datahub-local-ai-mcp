@@ -15,6 +15,7 @@ import logging
 
 from mcp_runner import fleet, render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 from mcp_runner.prometheus import (
     UNAVAILABLE,
     Reading,
@@ -28,7 +29,7 @@ from .. import settings
 
 logger = logging.getLogger(__name__)
 
-BUDGET = 3584
+BUDGET = tool_budget("node_fleet")
 _NOT_APPLICABLE = "n/a"
 
 # Every reading, with the join already applied. Each verified present in this

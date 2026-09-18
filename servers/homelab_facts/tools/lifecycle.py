@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 
 from .. import settings
 
-BUDGET = 3072
+CERT_BUDGET = tool_budget("cert_expiry")
+BACKUP_BUDGET = tool_budget("backup_freshness")
 
 # How many recent objects to consider when counting failures.
-_RECENT = 20
+_RECENT = tool_cap("recent")
 
 # Genuine failures, across Velero and CloudNativePG. `InProgress` and
 # `Deleting` are neither success nor failure and are counted as neither.
@@ -91,7 +93,7 @@ def cert_expiry() -> str:
         "that can return a Secret's contents."
     )
 
-    return truncate_lines(lines, BUDGET, unit="lines")
+    return truncate_lines(lines, CERT_BUDGET, unit="lines")
 
 
 def _condition(status: dict, kind: str) -> str:
@@ -167,7 +169,7 @@ def backup_freshness() -> str:
         "everybody assumes it is working. An 'unavailable' above is an unknown "
         "backup state, not a healthy one."
     )
-    return truncate_lines(lines, BUDGET, unit="lines")
+    return truncate_lines(lines, BACKUP_BUDGET, unit="lines")
 
 
 def _schedule_rows(

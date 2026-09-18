@@ -47,10 +47,16 @@ writes.** A tool that returns one report section's worth of already-correct
 readings replaces eight calls of exact arguments that a small model gets wrong.
 
 - **Few calls, never big answers.** Declare a `budget` per tool. A single ~16 KB
-  result reproducibly ends an agent run with `terminal turn had empty text` —
-  not context overflow, so no larger window fixes it. `Registry.call` clamps
-  whatever you return, but pick the budget deliberately: keep a single answer
-  under 4 KB.
+  result reproducibly ended an agent run with `terminal turn had empty text`
+  under the 4B model this fleet was first built for — not context overflow, so no
+  larger window fixed it. `Registry.call` clamps whatever you return, but pick
+  the budget deliberately. Declare it as `tool_budget("<tool_name>")` and add
+  the hand-tuned default to the sizing tables in `src/mcp_runner/config.py`: it
+  scales with `MCP_BUDGET_BYTES` (default 12,288) and can be overridden for that
+  one tool with `MCP_BUDGET_<TOOL_NAME>`. Do the same with
+  `tool_cap("<name>")` for the row, series or item cap that bounds what the tool
+  gathers, or the wider byte budget will truncate a list that was already cut
+  short.
 - **Take free text, return exact names.** Any string should be a valid argument.
   A tool that makes the caller assemble a namespace, a label selector or a
   container name is a tool that will be called wrong.

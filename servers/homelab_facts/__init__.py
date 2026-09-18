@@ -82,14 +82,14 @@ def register(registry: Registry) -> None:
         databases.POSTGRES_DESCRIPTION,
         databases.postgres_health,
         schema=databases.POSTGRES_SCHEMA,
-        budget=databases.BUDGET,
+        budget=databases.POSTGRES_BUDGET,
     )
     registry.add(
         "cache_health",
         databases.CACHE_DESCRIPTION,
         databases.cache_health,
         schema=databases.CACHE_SCHEMA,
-        budget=databases.BUDGET,
+        budget=databases.CACHE_BUDGET,
     )
     registry.add(
         "object_store_health",
@@ -117,14 +117,14 @@ def register(registry: Registry) -> None:
         lifecycle.CERT_DESCRIPTION,
         lifecycle.cert_expiry,
         schema=lifecycle.CERT_SCHEMA,
-        budget=lifecycle.BUDGET,
+        budget=lifecycle.CERT_BUDGET,
     )
     registry.add(
         "backup_freshness",
         lifecycle.BACKUP_DESCRIPTION,
         lifecycle.backup_freshness,
         schema=lifecycle.BACKUP_SCHEMA,
-        budget=lifecycle.BUDGET,
+        budget=lifecycle.BACKUP_BUDGET,
     )
     registry.add(
         "argocd_drift",

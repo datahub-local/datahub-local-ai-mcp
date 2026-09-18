@@ -74,6 +74,120 @@ def state_dir() -> str:
     return env("MCP_STATE_DIR", "/tmp/mcp-state")
 
 
+# --- Tool result sizing -----------------------------------------------------
+#
+# The hand-tuned sizes were tuned against a 4B model that stopped producing a
+# final turn on a single ~16 KB answer. A larger model lifts that ceiling, so the
+# working size is an operational setting and every budget and gathering cap
+# derives from it rather than being re-derived by hand.
+#
+# Everything is here: the reference, the env names, and the per-tool defaults.
+# Retuning a tool is one edit in the tables below, or `MCP_BUDGET_<TOOL>` /
+# `MCP_MAX_<NAME>` at deploy time, without touching the server that uses it.
+
+# What the hand-tuned bases were tuned against before the model changed.
+BUDGET_REFERENCE_BYTES = 4096
+
+# Three times the reference, because the small model is no longer in use.
+_DEFAULT_BUDGET_BYTES = 12_288
+
+# Per-tool byte budgets, as hand-tuned. The effective value scales with the
+# working size above; `MCP_BUDGET_<TOOL>` replaces it outright.
+_TOOL_BUDGET_BASES: dict[str, int] = {
+    # homelab_facts
+    "alerts_snapshot": 3072,
+    "find_object": 3072,
+    "why_failed": 4096,
+    "logs": 4096,
+    "endpoints": 3072,
+    "node_fleet": 3584,
+    "volume_fill": 2560,
+    "postgres_health": 3072,
+    "cache_health": 3072,
+    "object_store_health": 3584,
+    "stream_health": 2560,
+    "metrics_store_health": 2560,
+    "cert_expiry": 3072,
+    "backup_freshness": 3072,
+    "argocd_drift": 2560,
+    "top_services": 2560,
+    "workload_readiness": 2048,
+    "promql": 3072,
+    # semantic
+    "list_metrics": 3072,
+    "describe_metric": 2048,
+    "list_dimensions": 2048,
+    "explain": 2048,
+    "query": 4096,
+}
+
+# Gathering caps - rows, series, items - tuned beside the budgets. They move with
+# the working size too, or a wider answer would still return the old small list.
+# `MCP_MAX_<NAME>` replaces one outright, in whole items.
+_CAP_BASES: dict[str, int] = {
+    # homelab_facts
+    "series": 40,
+    "pods": 3,
+    "events": 6,
+    "log_lines": 12,
+    "line_chars": 200,
+    "logs_tail": 30,
+    "endpoint_checks": 4,
+    "resources": 6,
+    "recent": 20,
+    "top_n": 12,
+    # semantic
+    "match_values": 500,
+    "metrics": 5,
+    "limit": 1000,
+    "default_limit": 200,
+}
+
+
+def standard_budget_bytes() -> int:
+    """The per-answer size a tool result may occupy: `MCP_BUDGET_BYTES`."""
+    return int(env("MCP_BUDGET_BYTES", str(_DEFAULT_BUDGET_BYTES)))
+
+
+def scaled_budget(base: int) -> int:
+    """A hand-tuned budget or cap, widened to the configured working size."""
+    return max(1, round(base * standard_budget_bytes() / BUDGET_REFERENCE_BYTES))
+
+
+def _default_base(table: dict[str, int], kind: str, name: str) -> int:
+    if name not in table:
+        raise ConfigError(
+            f"no {kind} default for {name!r}: add it to config.py's sizing tables"
+        )
+    return table[name]
+
+
+def tool_budget(tool: str) -> int:
+    """A tool's byte budget: ``MCP_BUDGET_<TOOL>``, else its scaled default.
+
+    ``tool`` is the registered name, so ``logs`` reads ``MCP_BUDGET_LOGS`` and a
+    deployment can widen one answer without loosening every other one. The
+    override is absolute bytes, not a factor, so what it asks for is what it gets.
+    """
+    base = _default_base(_TOOL_BUDGET_BASES, "budget", tool)
+    override = env(f"MCP_BUDGET_{tool.upper()}")
+    if override:
+        return max(1, int(override))
+    return scaled_budget(base)
+
+
+def tool_cap(name: str) -> int:
+    """A gathering cap: ``MCP_MAX_<NAME>``, else its scaled default.
+
+    The override is whole items, not a factor.
+    """
+    base = _default_base(_CAP_BASES, "cap", name)
+    override = env(f"MCP_MAX_{name.upper()}")
+    if override:
+        return max(1, int(override))
+    return scaled_budget(base)
+
+
 def trino_url() -> str:
     """Trino's HTTP endpoint. Required, same reasoning as every other backend."""
     return require_url("TRINO_URL", "Trino")

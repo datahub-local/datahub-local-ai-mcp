@@ -40,14 +40,15 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 from mcp_runner.garage import GarageError, GarageUnconfigured, bucket_name
 from mcp_runner.prometheus import PrometheusError, increase_, used_percent
 
 from .. import settings
 
-OBJECT_STORE_BUDGET = 3584
-STREAM_BUDGET = 2560
-METRICS_STORE_BUDGET = 2560
+OBJECT_STORE_BUDGET = tool_budget("object_store_health")
+STREAM_BUDGET = tool_budget("stream_health")
+METRICS_STORE_BUDGET = tool_budget("metrics_store_health")
 
 # Scoped by the software's own name, not by the Helm release that deployed it.
 # The bare `cluster_*`, `table_*`, `block_*` and `api_s3_*` names are Garage's

@@ -49,14 +49,24 @@ with invented numbers — that is how a memory reading came to be relabelled as
 disk and a 5%-full disk reported as "79% (CRITICAL)".
 
 **3. Every answer is bounded, in code.** "Fat tool" means *few calls*, never *big
-answers*. A single ~16 KB tool result reproducibly ends a run with no report at
-all: four calls for 24,126 result bytes produced `terminal turn had empty text`,
-where five calls for 8,483 bytes the same day wrote a normal report. It is not
-context overflow — cumulative input was 25,423 tokens against a 65,536 window. So
-each tool declares a byte budget, truncates by whole lines, and *says* it
-truncated. A full eleven-reading sweep is about 17.8 KB, and no single answer
-exceeds 4 KB. `Registry.call` clamps whatever a tool returns, so a new tool
-cannot forget its budget.
+answers*. Under the 4B model this fleet was first built for, a single ~16 KB tool
+result reproducibly ended a run with no report at all: four calls for 24,126
+result bytes produced `terminal turn had empty text`, where five calls for 8,483
+bytes the same day wrote a normal report. It was not context overflow —
+cumulative input was 25,423 tokens against a 65,536 window. So each tool declares
+a byte budget, truncates by whole lines, and *says* it truncated. `Registry.call`
+clamps whatever a tool returns, so a new tool cannot forget its budget.
+
+That model is no longer in use, so the size is not fixed in the code. The
+standard budget is `MCP_BUDGET_BYTES` (default 12,288, three times the 4 KB the
+small model needed) and every hand-tuned per-tool budget scales with it, keeping
+the shape of the original tuning. One tool can be widened on its own with
+`MCP_BUDGET_<TOOL_NAME>` — `MCP_BUDGET_LOGS`, say — named after the tool as
+registered. The row, series and item caps that bound what a tool *gathers* grow
+with the same factor, overridable as `MCP_MAX_<NAME>`, because a wider answer
+budget that still returns the old small list changes nothing. Every hand-tuned
+base and env name lives in `src/mcp_runner/config.py`; the bound itself remains,
+because a larger model lifts the ceiling, it does not remove the need for one.
 
 **4. Trends are measured, not remembered.** The server holds snapshots, so "new
 since last run" is a computation. A lost snapshot degrades to "first

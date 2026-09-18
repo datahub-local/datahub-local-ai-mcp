@@ -14,16 +14,17 @@ than by a prohibition.
 from __future__ import annotations
 
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 
 from .. import settings
 from ..compiler import compile_query, inline_sql
 from ..query import DEFAULT_LIMIT, MAX_LIMIT, OPS, QueryError, parse, validate
 from ..registry import GRAINS
 
-LIST_BUDGET = 3072
-DESCRIBE_BUDGET = 2048
-DIMENSIONS_BUDGET = 2048
-EXPLAIN_BUDGET = 2048
+LIST_BUDGET = tool_budget("list_metrics")
+DESCRIBE_BUDGET = tool_budget("describe_metric")
+DIMENSIONS_BUDGET = tool_budget("list_dimensions")
+EXPLAIN_BUDGET = tool_budget("explain")
 
 LIST_DESCRIPTION = """
 Every metric this server can compute, with what each one leaves out. Start here:

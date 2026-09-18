@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import scaled_budget, tool_budget
 from mcp_runner.trino import Trino, TrinoError
 
 from .. import settings
@@ -34,11 +35,11 @@ from .discovery import model_of
 
 logger = logging.getLogger(__name__)
 
-QUERY_BUDGET = 4096
+QUERY_BUDGET = tool_budget("query")
 
 # Floor for the row section, so a query naming five metrics with long exclusions
 # still returns numbers rather than only its own caveats.
-_MIN_ROW_BUDGET = 1024
+_MIN_ROW_BUDGET = scaled_budget(1024)
 
 QUERY_DESCRIPTION = """
 Run a metric query and return the numbers. Name metrics from `list_metrics` and

@@ -1,15 +1,18 @@
-"""Byte budgets for tool results.
+"""Byte truncation for tool results.
 
 A "fat tool" means *few calls*, never *big answers*: one oversized result ends a
-run with no report at all, and not by overflowing the context. Each tool declares
-a budget, truncates by whole lines, and says that it truncated. See ../README.md.
+run with no report at all, and not by overflowing the context. This module only
+cuts text to fit. Where a tool's budget comes from - the env var, the hand-tuned
+base, the scaling - is `config.py`, so the whole sizing policy lives in one
+place. See ../README.md.
 """
 
 from __future__ import annotations
 
-# Per tool, not per run: well under the size that reproducibly kills a final
-# turn, and above the largest result that worked.
-DEFAULT_BUDGET_BYTES = 4096
+from .config import standard_budget_bytes
+
+# The effective default, read once at import so it can be a function default.
+DEFAULT_BUDGET_BYTES = standard_budget_bytes()
 
 # What a truncation notice costs, so the notice itself can never push a result
 # back over its budget.

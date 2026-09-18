@@ -21,13 +21,14 @@ from __future__ import annotations
 from mcp_runner import kube, render
 from mcp_runner import loki as loki_module
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 
 from .. import settings
 from . import lookup
 
-BUDGET = 4096
-LOGS_BUDGET = 4096
-ENDPOINTS_BUDGET = 3072
+BUDGET = tool_budget("why_failed")
+LOGS_BUDGET = tool_budget("logs")
+ENDPOINTS_BUDGET = tool_budget("endpoints")
 
 # What can fail, in the sense a person means by "why did X fail". A Namespace, a
 # Node or a PVC is not investigated this way, so they are not searched: a term
@@ -65,11 +66,11 @@ _REACHABLE: tuple[tuple[str, str], ...] = (
 
 # Bounds. Few calls, small answers: one oversized result reproducibly ends a run
 # with no report at all.
-_MAX_PODS = 3
-_MAX_EVENTS = 6
-_MAX_LOG_LINES = 12
-_MAX_LINE_CHARS = 200
-_LOGS_TAIL = 30
+_MAX_PODS = tool_cap("pods")
+_MAX_EVENTS = tool_cap("events")
+_MAX_LOG_LINES = tool_cap("log_lines")
+_MAX_LINE_CHARS = tool_cap("line_chars")
+_LOGS_TAIL = tool_cap("logs_tail")
 _LOKI_WINDOW_SECONDS = 21600  # 6h, stated in the output rather than assumed
 
 # Container states that are a cause on their own. The message beside each is what

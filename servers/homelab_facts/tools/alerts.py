@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget
 from mcp_runner.prometheus import PrometheusError
 from mcp_runner.state import diff_keys
 
 from .. import settings
 
-BUDGET = 3072
+BUDGET = tool_budget("alerts_snapshot")
 _SNAPSHOT_KEY = "alerts"
 
 # Firing only: a pending alert has not met its `for` duration and is not yet a

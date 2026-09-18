@@ -23,16 +23,17 @@ import re
 from mcp_runner import config as runner_config
 from mcp_runner import render
 from mcp_runner.budget import truncate_lines
+from mcp_runner.config import tool_budget, tool_cap
 from mcp_runner.prometheus import PrometheusError
 
 from .. import settings
 
 logger = logging.getLogger(__name__)
 
-BUDGET = 2560
-READINESS_BUDGET = 2048
+BUDGET = tool_budget("top_services")
+READINESS_BUDGET = tool_budget("workload_readiness")
 
-_TOP_N = 12
+_TOP_N = tool_cap("top_n")
 
 # Fixed, not an argument. A window has exactly one correct shape ("24h", never
 # "24 hours"), which is the class of argument this server does not take.

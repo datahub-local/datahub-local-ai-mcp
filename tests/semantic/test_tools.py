@@ -11,6 +11,7 @@ import json
 from semantic import register
 from semantic.tools import discovery
 
+from mcp_runner.budget import DEFAULT_BUDGET_BYTES
 from mcp_runner.server import Registry as ToolRegistry
 
 
@@ -165,11 +166,11 @@ class TestRegistration:
             assert "sql" not in name.lower()
             assert "execute" not in name.lower()
 
-    def test_every_tool_declares_a_budget_under_4kb(self):
+    def test_every_tool_declares_a_budget_within_the_configured_size(self):
         tools = ToolRegistry()
         register(tools)
         for tool in tools.tools.values():
-            assert 0 < tool.budget <= 4096
+            assert 0 < tool.budget <= DEFAULT_BUDGET_BYTES
 
     def test_schemas_reject_unknown_arguments(self):
         tools = ToolRegistry()

@@ -35,6 +35,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from mcp_runner.config import tool_cap
 from mcp_runner.trino import TrinoError
 
 from .registry import Registry, bind_tables
@@ -62,7 +63,7 @@ _SCOPES_VAR = "SEMANTIC_WAREHOUSE_SCOPES"
 # Held for near-miss matching, which is why the cap is this high: the dimension
 # most likely to be filtered on is usually the highest-cardinality one, so a
 # tidier number would drop the suggestion exactly where it is needed.
-MAX_MATCH_VALUES = 500
+MAX_MATCH_VALUES = tool_cap("match_values")
 
 
 def registry_path() -> Path:
