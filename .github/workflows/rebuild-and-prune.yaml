@@ -1,0 +1,132 @@
+name: Rebuild and prune
+
+# A weekly rebuild carries in base-image CVE fixes, which arrive without a commit
+# here: the Python base and every OS package move on their own. Prune keeps the
+# registry bounded.
+#
+# Staggered one image per day, Monday to Thursday, so a failure is attributable to
+# one server and the heavy multi-arch builds do not compete. Friday prunes.
+#
+# The day-of-week field is used rather than a `*/14` day-of-month step: the latter
+# matches the 1st, 15th and 29th, whose gap into the next month is three days, so
+# it is not an every-14-days rule.
+on:
+  schedule:
+    - cron: "23 3 * * 1" # mcp-homelab-facts
+    - cron: "23 3 * * 2" # mcp-render
+    - cron: "23 3 * * 3" # mcp-semantic
+    - cron: "23 3 * * 4" # prune
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "Which server to rebuild"
+        type: choice
+        options: [homelab_facts, render, semantic, all]
+        default: all
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: rebuild-mcp
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.pick.outputs.target }}
+    steps:
+      - name: Pick the target
+        id: pick
+        run: |
+          case "${{ github.event.schedule }}" in
+            "23 3 * * 1") echo "target=homelab_facts" >> "$GITHUB_OUTPUT" ;;
+            "23 3 * * 2") echo "target=render" >> "$GITHUB_OUTPUT" ;;
+            "23 3 * * 3") echo "target=semantic" >> "$GITHUB_OUTPUT" ;;
+            "23 3 * * 4") echo "target=prune" >> "$GITHUB_OUTPUT" ;;
+            *)           echo "target=${{ inputs.server }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  resolve:
+    needs: select
+    if: needs.select.outputs.target != 'prune'
+    runs-on: ubuntu-latest
+    outputs:
+      servers: ${{ steps.list.outputs.servers }}
+    steps:
+      - name: Resolve the matrix
+        id: list
+        run: |
+          if [ "${{ needs.select.outputs.target }}" = "all" ]; then
+            echo 'servers=["homelab_facts","render","semantic"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'servers=["${{ needs.select.outputs.target }}"]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        server: ${{ fromJson(needs.resolve.outputs.servers) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same name transform as publish.yaml: underscores are legal in a Python
+      # package and illegal in an image name.
+      - name: Rebuild ${{ matrix.server }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/datahub-local/mcp-${SERVER//_/-}"
+          echo "building $image"
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --build-arg "SERVER=${{ matrix.server }}" \
+            --build-arg "SEMANTIC_REGISTRY_VERSION=${{ github.sha }}" \
+            --tag "$image:main" \
+            .
+        env:
+          SERVER: ${{ matrix.server }}
+
+  # RETENTION — both modes, because publish.yaml pushes two tags per build:
+  # `:main` (the moving tag consumers point at) and `:<sha>` (provenance). Without
+  # this every build adds a version forever.
+  #
+  # `main` is ignored so the pullable tag is never removed; five sha versions are
+  # kept, which is enough to roll back through a bad week of rebuilds.
+  prune:
+    needs: select
+    if: always() && (needs.select.outputs.target == 'prune' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [mcp-homelab-facts, mcp-render, mcp-semantic]
+    steps:
+      - name: Prune old versions of ${{ matrix.package }} (keep 5, never main)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 5
+          ignore-versions: "^main$"
