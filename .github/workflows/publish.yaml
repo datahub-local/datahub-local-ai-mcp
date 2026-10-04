@@ -1,52 +1,116 @@
-name: Publish
+name: Publish and rebuild
 
+# One workflow owns every image this repository publishes. It replaces publish.yaml
+# plus a rebuild/prune workflow that between them did the same buildx for the same
+# images and differed only in trigger.
+#
+# Three triggers, one build:
+#
+#   workflow_run  the test workflow passed -> publish at merge.
+#   schedule      an image ages even when nothing here changes, because its base
+#                 image is a moving target - Python and every OS package publish
+#                 CVE fixes without a commit. One server per weekday carries those
+#                 in, staggered so a failure is attributable and the heavy
+#                 multi-arch builds do not compete.
+#   dispatch      rebuild or prune on demand.
+#
+# The day-of-week field is used rather than a `*/14` day-of-month step: the latter
+# matches the 1st, 15th and 29th (steps count from the field's minimum), so the gap
+# from the 29th into the next month is three days. It is not an every-14-days rule.
 on:
   workflow_run:
     workflows: [Test]
     types: [completed]
     branches: [main]
+  schedule:
+    - cron: "23 3 * * 1" # mcp-homelab-facts
+    - cron: "23 3 * * 2" # mcp-render
+    - cron: "23 3 * * 3" # mcp-semantic
+    - cron: "23 3 * * 4" # prune
   workflow_dispatch:
+    inputs:
+      target:
+        description: "Which server to build, or prune"
+        type: choice
+        options: [homelab_facts, render, semantic, all, prune]
+        default: all
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
 
 jobs:
-  # `servers/` is the source of truth for what gets published. Adding a server
-  # directory adds an image with no edit to this file - which is the whole point
-  # of one parameterised Dockerfile over one per server.
-  discover:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+  select:
     runs-on: ubuntu-latest
     outputs:
-      servers: ${{ steps.list.outputs.servers }}
+      servers: ${{ steps.pick.outputs.servers }}
+      prune: ${{ steps.pick.outputs.prune }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
-
-      - name: List servers
-        id: list
+      - name: Decide the targets
+        id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          DISPATCH: ${{ inputs.target }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
-          # A server is a directory under servers/ holding an __init__.py, which
-          # is what makes it importable by `--server <name>`. Anything else there
-          # is not a server and must not become an image.
-          servers=$(find servers -mindepth 2 -maxdepth 2 -name '__init__.py' \
-                    -exec dirname {} \; | xargs -n1 basename | sort | jq -Rsc 'split("\n")[:-1]')
-          echo "servers=$servers" >> "$GITHUB_OUTPUT"
-          echo "publishing: $servers"
+          echo "prune=false" >> "$GITHUB_OUTPUT"
 
-  build-and-push:
-    needs: discover
+          if [ "$EVENT" = "workflow_run" ] && [ "$CONCLUSION" != "success" ]; then
+            echo "tests did not succeed; nothing to publish"
+            echo 'servers=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$EVENT" = "schedule" ]; then
+            case "$SCHEDULE" in
+              "23 3 * * 1") echo 'servers=["homelab_facts"]' >> "$GITHUB_OUTPUT" ;;
+              "23 3 * * 2") echo 'servers=["render"]' >> "$GITHUB_OUTPUT" ;;
+              "23 3 * * 3") echo 'servers=["semantic"]' >> "$GITHUB_OUTPUT" ;;
+              "23 3 * * 4")
+                echo 'servers=[]' >> "$GITHUB_OUTPUT"
+                echo "prune=true" >> "$GITHUB_OUTPUT"
+                ;;
+            esac
+            exit 0
+          fi
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$DISPATCH" = "prune" ]; then
+              echo 'servers=[]' >> "$GITHUB_OUTPUT"
+              echo "prune=true" >> "$GITHUB_OUTPUT"
+            elif [ "$DISPATCH" = "all" ]; then
+              echo 'servers=["homelab_facts","render","semantic"]' >> "$GITHUB_OUTPUT"
+            else
+              echo "servers=[\"$DISPATCH\"]" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          # workflow_run. Unlike the ai repository, `servers/` is the source of
+          # truth and the Dockerfile is parameterised, so every server image is
+          # built from the same inputs - there is no per-server path to filter on.
+          # A push to main rebuilds what `discover` finds, which is the point of
+          # one parameterised Dockerfile over one per server.
+          echo 'servers=["homelab_facts","render","semantic"]' >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: select
+    if: needs.select.outputs.servers != '[]'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
-        server: ${{ fromJson(needs.discover.outputs.servers) }}
+        server: ${{ fromJSON(needs.select.outputs.servers) }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -58,30 +122,52 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Underscores are legal in a Python package and illegal in an image name,
-      # so homelab_facts publishes as mcp-homelab-facts. `serverInfo.name` uses
-      # the same transform, so the name a bridge reports matches the image.
-      - name: Image name
-        id: name
-        run: echo "image=ghcr.io/datahub-local/mcp-${SERVER//_/-}" >> "$GITHUB_OUTPUT"
+      # Underscores are legal in a Python package and illegal in an image name, so
+      # homelab_facts publishes as mcp-homelab-facts. `serverInfo.name` uses the
+      # same transform, so the name a bridge reports matches the image.
+      - name: Build and push mcp-${{ matrix.server }}
         env:
           SERVER: ${{ matrix.server }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/datahub-local/mcp-${SERVER//_/-}"
+          echo "building $image"
+          # arm64 is mandatory, not a nicety: agents are scheduled onto the Orange
+          # Pi nodes, and a server with no arm64 image is unschedulable there -
+          # which the agent experiences as the tool never appearing, with nothing
+          # failing loudly anywhere.
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --push \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --build-arg "SERVER=$SERVER" \
+            --build-arg "SEMANTIC_REGISTRY_VERSION=$SHA" \
+            --tag "$image:main" \
+            --tag "$image:$SHA" \
+            .
 
-      # arm64 is mandatory, not a nicety: agents are scheduled onto the Orange
-      # Pi nodes, and a server with no arm64 image is unschedulable there - which
-      # the agent experiences as the tool never appearing, with nothing failing
-      # loudly anywhere.
-      - name: Build and push ${{ matrix.server }}
-        uses: docker/build-push-action@v5
+  # RETENTION - both modes, because a build pushes two tags: `:main` (the moving
+  # tag consumers point at) and the commit sha (provenance). Without this every
+  # build adds a version forever.
+  #
+  # `main` is ignored so the pullable tag is never removed; five sha versions are
+  # kept, enough to roll back through a bad week of rebuilds.
+  prune:
+    needs: select
+    if: needs.select.outputs.prune == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [mcp-homelab-facts, mcp-render, mcp-semantic]
+    steps:
+      - name: Prune old versions of ${{ matrix.package }} (keep 5, never main)
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
         with:
-          context: .
-          push: true
-          platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ steps.name.outputs.image }}:main
-            ${{ steps.name.outputs.image }}:${{ github.event.workflow_run.head_sha || github.sha }}
-          build-args: |
-            SERVER=${{ matrix.server }}
-            SEMANTIC_REGISTRY_VERSION=${{ github.event.workflow_run.head_sha || github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: 5
+          ignore-versions: "^main$"
