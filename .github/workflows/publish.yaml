@@ -24,7 +24,6 @@ on:
     branches: [main]
   schedule:
     - cron: "23 3 * * 1" # mcp-homelab-facts
-    - cron: "23 3 * * 2" # mcp-render
     - cron: "23 3 * * 3" # mcp-semantic
     - cron: "23 3 * * 4" # prune
   workflow_dispatch:
@@ -32,7 +31,7 @@ on:
       target:
         description: "Which server to build, or prune"
         type: choice
-        options: [homelab_facts, render, semantic, all, prune]
+        options: [homelab_facts, semantic, all, prune]
         default: all
 
 permissions:
@@ -70,7 +69,6 @@ jobs:
           if [ "$EVENT" = "schedule" ]; then
             case "$SCHEDULE" in
               "23 3 * * 1") echo 'servers=["homelab_facts"]' >> "$GITHUB_OUTPUT" ;;
-              "23 3 * * 2") echo 'servers=["render"]' >> "$GITHUB_OUTPUT" ;;
               "23 3 * * 3") echo 'servers=["semantic"]' >> "$GITHUB_OUTPUT" ;;
               "23 3 * * 4")
                 echo 'servers=[]' >> "$GITHUB_OUTPUT"
@@ -85,7 +83,7 @@ jobs:
               echo 'servers=[]' >> "$GITHUB_OUTPUT"
               echo "prune=true" >> "$GITHUB_OUTPUT"
             elif [ "$DISPATCH" = "all" ]; then
-              echo 'servers=["homelab_facts","render","semantic"]' >> "$GITHUB_OUTPUT"
+              echo 'servers=["homelab_facts","semantic"]' >> "$GITHUB_OUTPUT"
             else
               echo "servers=[\"$DISPATCH\"]" >> "$GITHUB_OUTPUT"
             fi
@@ -97,7 +95,7 @@ jobs:
           # built from the same inputs - there is no per-server path to filter on.
           # A push to main rebuilds what `discover` finds, which is the point of
           # one parameterised Dockerfile over one per server.
-          echo 'servers=["homelab_facts","render","semantic"]' >> "$GITHUB_OUTPUT"
+          echo 'servers=["homelab_facts","semantic"]' >> "$GITHUB_OUTPUT"
 
   build:
     needs: select
@@ -161,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [mcp-homelab-facts, mcp-render, mcp-semantic]
+        package: [mcp-homelab-facts, mcp-semantic]
     steps:
       - name: Prune old versions of ${{ matrix.package }} (keep 5, never main)
         uses: actions/delete-package-versions@v5

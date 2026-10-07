@@ -119,8 +119,6 @@ _TOOL_BUDGET_BASES: dict[str, int] = {
     "list_dimensions": 2048,
     "explain": 2048,
     "query": 4096,
-    # render
-    "render_asset": 1024,
 }
 
 # Gathering caps - rows, series, items - tuned beside the budgets. They move with
