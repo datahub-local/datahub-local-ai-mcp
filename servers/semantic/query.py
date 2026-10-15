@@ -138,11 +138,11 @@ def _as_date(value: Any, where: str) -> date | None:
         return value
     try:
         # A calendar date carries no timezone; attaching one would shift the
-        # window by a day for any caller east or west of UTC. DTZ is not in this
-        # project's rule set, so there is no directive here to suppress it: ruff
-        # 0.17 reports an unused `# noqa: DTZ007` as RUF100, and a directive that
-        # suppresses nothing is worse than none, because it hides the next
-        # enabled rule on the line it sits on.
+        # window by a day for any caller east or west of UTC. DTZ007 is not in
+        # this project's rule set, so there is no directive here to suppress it:
+        # ruff 0.17 reports an unused one as RUF100, and a directive that
+        # suppresses nothing is worse than none, because it sits on the line
+        # where the next enabled rule would fire.
         return datetime.strptime(str(value), "%Y-%m-%d").date()
     except ValueError:
         raise QueryError(f"{where} must be YYYY-MM-DD, got {value!r}") from None
