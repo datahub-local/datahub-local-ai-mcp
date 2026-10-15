@@ -3,12 +3,13 @@
 A platform for MCP servers: one shared runner, one directory per server, one
 image per server, and **no deployment's data in the repository**.
 
-Two servers ship today:
+Three servers ship today:
 
 | Server          | Tools | What it answers                                            | Data it needs mounted               |
 | --------------- | ----- | ---------------------------------------------------------- | ----------------------------------- |
 | `homelab_facts` | 18    | Cluster state: alerts, nodes, volumes, stores, certs, logs | chronic alerts + thresholds         |
 | `semantic`      | 5     | Metric definitions, and the SQL that computes them         | registry + dbt manifest (+ samples) |
+| `utils`         | 2     | The temp bucket: store a fetched file, sign a download URL | none — a bucket key in its env      |
 
 ## Why this exists
 
@@ -118,7 +119,9 @@ goes through the pod ServiceAccount; ArgoCD state comes from `Application` CRs
 rather than the ArgoCD API; Postgres state from the CloudNativePG operator's
 metrics rather than a DSN.
 
-The single exception is opt-in and named: **per-bucket S3 usage has no
+There are two named exceptions, and neither is a convenience.
+
+The first is opt-in: **per-bucket S3 usage has no
 unauthenticated source.** Garage publishes no bucket label and no stored-bytes
 gauge to Prometheus. With no token the bucket section reports itself
 `unavailable` and nothing else changes. Where a token *is* supplied the boundary
@@ -138,6 +141,28 @@ an unfiltered cluster-wide Secret list transfers every value in every namespace,
 The log tail is the one read that can echo a value an application printed itself,
 and no boundary here can prevent that — it is a property of logs, not of this
 server.
+
+The second is `utils`, and it is the only server here that **writes**. It exists
+because a rendered asset must reach object storage without any workflow carrying
+it: n8n persists an execution's binaries as well as its JSON, so a workflow that
+fetches an asset and uploads it keeps a copy of it on the way past — measured on
+the origin instance, 249 MB of `binary_data` across 903 rows in a 1335 MB
+database. Moving the bytes between two processes that are not n8n is what lets a
+workflow record a run and hold only a key. So the credential is not avoidable
+here, and it is bounded instead:
+
+- **One bucket, and one prefix inside it.** The deployment sets `TEMP_BUCKET` and
+  `TEMP_PREFIX`; the client refuses a key outside the prefix and a key that is not
+  flat below it, because the prune lists the prefix with a `/` delimiter and a
+  nested object would never be seen by it. The key itself should carry `write`
+  alone unless downloads are wanted, and `read` then, and nothing else.
+- **No credential reaches an answer.** A signed URL necessarily carries the access
+  key id — that is how S3 presigning works — and nothing else does. The secret is
+  resolved by boto3's own chain from the environment and is never read into code.
+- **A zero-byte source is refused rather than stored**, so a render that produced
+  no frames cannot be recorded as an asset.
+
+See `src/mcp_runner/s3.py`, which is the whole of it.
 
 ## Data is mounted
 

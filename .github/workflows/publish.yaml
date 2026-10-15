@@ -26,12 +26,13 @@ on:
     - cron: "23 3 * * 1" # mcp-homelab-facts
     - cron: "23 3 * * 3" # mcp-semantic
     - cron: "23 3 * * 4" # prune
+    - cron: "23 3 * * 5" # mcp-utils
   workflow_dispatch:
     inputs:
       target:
         description: "Which server to build, or prune"
         type: choice
-        options: [homelab_facts, semantic, all, prune]
+        options: [homelab_facts, semantic, utils, all, prune]
         default: all
 
 permissions:
@@ -70,6 +71,7 @@ jobs:
             case "$SCHEDULE" in
               "23 3 * * 1") echo 'servers=["homelab_facts"]' >> "$GITHUB_OUTPUT" ;;
               "23 3 * * 3") echo 'servers=["semantic"]' >> "$GITHUB_OUTPUT" ;;
+              "23 3 * * 5") echo 'servers=["utils"]' >> "$GITHUB_OUTPUT" ;;
               "23 3 * * 4")
                 echo 'servers=[]' >> "$GITHUB_OUTPUT"
                 echo "prune=true" >> "$GITHUB_OUTPUT"
@@ -83,7 +85,7 @@ jobs:
               echo 'servers=[]' >> "$GITHUB_OUTPUT"
               echo "prune=true" >> "$GITHUB_OUTPUT"
             elif [ "$DISPATCH" = "all" ]; then
-              echo 'servers=["homelab_facts","semantic"]' >> "$GITHUB_OUTPUT"
+              echo 'servers=["homelab_facts","semantic","utils"]' >> "$GITHUB_OUTPUT"
             else
               echo "servers=[\"$DISPATCH\"]" >> "$GITHUB_OUTPUT"
             fi
@@ -95,7 +97,7 @@ jobs:
           # built from the same inputs - there is no per-server path to filter on.
           # A push to main rebuilds what `discover` finds, which is the point of
           # one parameterised Dockerfile over one per server.
-          echo 'servers=["homelab_facts","semantic"]' >> "$GITHUB_OUTPUT"
+          echo 'servers=["homelab_facts","semantic","utils"]' >> "$GITHUB_OUTPUT"
 
   build:
     needs: select
@@ -159,7 +161,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: [mcp-homelab-facts, mcp-semantic]
+        package: [mcp-homelab-facts, mcp-semantic, mcp-utils]
     steps:
       - name: Prune old versions of ${{ matrix.package }} (keep 5, never main)
         uses: actions/delete-package-versions@v5

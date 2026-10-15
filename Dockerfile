@@ -1,7 +1,7 @@
 # One Dockerfile, one image per server, selected by --build-arg SERVER.
 #
 # Not one Dockerfile per server: the dependency set is the union across servers
-# (four packages) and identical for all of them, so per-server files would be N
+# (five packages) and identical for all of them, so per-server files would be N
 # copies differing only in a CMD line - and adding a server would mean writing a
 # new one. The publish workflow matrixes over `servers/*` instead, so a new
 # directory gets an image with no new build config.
@@ -79,8 +79,9 @@ ENV SEMANTIC_REGISTRY_VERSION=${SEMANTIC_REGISTRY_VERSION}
 
 # No credential of its own: Prometheus and Loki need no auth on the target
 # cluster and Kubernetes reads go through the pod ServiceAccount, so there is no
-# reason to run as root. Garage's admin token is the one opt-in exception and
-# arrives as an env var, never in the image.
+# reason to run as root. Two exceptions arrive as env vars and never in the
+# image: Garage's admin token, opt-in and usually absent, and the temp bucket's
+# key, which `utils` needs because it is the one server here that writes.
 USER 65532
 
 EXPOSE 8080

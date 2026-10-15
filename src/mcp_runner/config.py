@@ -119,6 +119,10 @@ _TOOL_BUDGET_BASES: dict[str, int] = {
     "list_dimensions": 2048,
     "explain": 2048,
     "query": 4096,
+    # utils - one line of key=value pairs each. `temp_retrieve` carries a signed
+    # URL, which is the longer of the two by an order of magnitude.
+    "temp_store": 1024,
+    "temp_retrieve": 1536,
 }
 
 # Gathering caps - rows, series, items - tuned beside the budgets. They move with
@@ -260,3 +264,35 @@ def garage_admin_token() -> str | None:
 
 def garage_timeout() -> float:
     return float(env("GARAGE_TIMEOUT_SECONDS", "10"))
+
+
+def temp_s3_endpoint() -> str | None:
+    """The S3 endpoint of the temp bucket, or ``None`` when the deployment has none.
+
+    ``None`` rather than ``require_url`` for the same reason ``garage_admin_url``
+    is: a cached accessor constructs the bucket before any tool knows whether the
+    deployment supplies one, so raising here would land at construction and take
+    every tool in the server down with it. The unconfigured path is
+    ``S3Unconfigured``, which the caller renders as an error.
+    """
+    return env("TEMP_S3_ENDPOINT")
+
+
+def temp_s3_region() -> str | None:
+    """The region the signature is made in. No default: a guessed region signs
+    requests a stricter S3 rejects, and the failure reads as an unreachable bucket."""
+    return env("TEMP_S3_REGION")
+
+
+def temp_bucket() -> str | None:
+    """The bucket this deployment stores temp objects in."""
+    return env("TEMP_BUCKET")
+
+
+def temp_prefix() -> str | None:
+    """The one prefix this deployment owns inside that bucket.
+
+    Required rather than defaulted, because the prefix is what the prune lists:
+    an object written outside it is an object nothing ever deletes.
+    """
+    return env("TEMP_PREFIX")
