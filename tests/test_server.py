@@ -200,3 +200,125 @@ class TestTransport:
         out = self._post(app, "/", {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         headers = dict(out[0]["headers"])
         assert b"mcp-session-id" not in {key.lower() for key in headers}
+
+
+class TestTheLoopStaysFreeWhileAToolRuns:
+    """A probe is answered by the event loop, so a tool must not occupy it.
+
+    Measured 2026-10-30: `/healthz` waited for the whole tool call, so a report
+    of dozens of sequential Prometheus queries timed the probes out for minutes
+    — first dropping the pod out of its Service (callers hung until their own
+    deadline) and then dying on the liveness threshold with the call in flight.
+    """
+
+    def _request(self, app, method, path, body=None):
+        messages = []
+
+        async def receive():
+            return {"type": "http.request", "body": body or b"", "more_body": False}
+
+        async def send(message):
+            messages.append(message)
+
+        scope = {"type": "http", "method": method, "path": path, "headers": []}
+        return app(scope, receive, send), messages
+
+    def _call(self, name="probe"):
+        return json.dumps(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name}}
+        ).encode()
+
+    def test_healthz_answers_while_a_tool_is_still_running(self):
+        import asyncio
+        import threading
+        import time
+
+        released = threading.Event()
+        started = threading.Event()
+
+        def blocking_tool():
+            started.set()
+            released.wait(timeout=5)
+            return "blocked tool done"
+
+        app = build_app(registry_with(blocking_tool))
+
+        async def scenario():
+            tool, tool_messages = self._request(app, "POST", "/", self._call())
+            running = asyncio.create_task(tool)
+            # Without the fix this loop cannot be scheduled at all while the tool
+            # blocks, so the watchdog below is what fails the test, not the await.
+            for _ in range(500):
+                await asyncio.sleep(0.01)
+                if started.is_set():
+                    break
+
+            probe, probe_messages = self._request(app, "GET", "/healthz")
+            issued = time.monotonic()
+            await asyncio.wait_for(probe, timeout=1.0)
+            waited = time.monotonic() - issued
+
+            assert not released.is_set(), "the probe answered only once the tool had finished"
+            released.set()
+            await running
+            return waited, probe_messages, tool_messages
+
+        watchdog = threading.Timer(2.0, released.set)
+        watchdog.start()
+        try:
+            waited, probe_messages, tool_messages = asyncio.run(scenario())
+        finally:
+            watchdog.cancel()
+            released.set()
+
+        assert probe_messages[0]["status"] == 200
+        assert waited < 0.5, f"/healthz waited {waited:.2f}s for the tool"
+        assert b"blocked tool done" in tool_messages[1]["body"]
+
+    def test_the_tool_runs_off_the_event_loop_thread(self):
+        import asyncio
+        import threading
+
+        threads = {}
+
+        def tool():
+            threads["tool"] = threading.get_ident()
+            return "ok"
+
+        app = build_app(registry_with(tool))
+
+        async def scenario():
+            threads["loop"] = threading.get_ident()
+            post, _ = self._request(app, "POST", "/", self._call())
+            await post
+
+        asyncio.run(scenario())
+        assert threads["tool"] != threads["loop"]
+
+    def test_tool_calls_do_not_overlap(self):
+        # One worker, deliberately: the tools share the snapshot directory, and a
+        # pool would let two diff-based readings of the same key interleave.
+        import asyncio
+        import time
+
+        active = 0
+        peak = 0
+
+        def tool():
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            time.sleep(0.1)
+            active -= 1
+            return "ok"
+
+        app = build_app(registry_with(tool))
+
+        async def scenario():
+            first, _ = self._request(app, "POST", "/", self._call())
+            second, _ = self._request(app, "POST", "/", self._call())
+            await asyncio.gather(first, second)
+
+        asyncio.run(scenario())
+        assert peak == 1
+

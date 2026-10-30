@@ -8,9 +8,11 @@ carry a session id between calls works unchanged. See ../README.md.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -22,6 +24,15 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "2025-06-18"
 
 _HEALTH_PATHS = frozenset({"/healthz", "/readyz", "/livez"})
+
+# Every tool blocks on synchronous HTTP, so a call runs here rather than on the
+# event loop. Answering `/healthz` from the loop is what keeps a multi-minute
+# report from reading as a dead process: the probes used to time out for the
+# tool's whole duration, which dropped the pod out of its Service so callers
+# hung until their own deadline, and past the liveness threshold SIGKILLed the
+# call in flight (measured 2026-10-30). One worker, not a pool, because the tools
+# share the snapshot directory and today's serialization is what they assume.
+_TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mcp-tool")
 
 
 @dataclass
@@ -184,20 +195,28 @@ def build_app(registry: Registry) -> Callable:
             return
 
         if isinstance(payload, list):
-            replies = [reply for reply in (handle_rpc(registry, item) for item in payload) if reply]
+            replies = await _off_loop(_dispatch_batch, registry, payload)
             if not replies:
                 await _respond(send, 202, b"", "application/json")
                 return
             await _send_rpc(send, headers, replies)
             return
 
-        reply = handle_rpc(registry, payload)
+        reply = await _off_loop(handle_rpc, registry, payload)
         if reply is None:
             await _respond(send, 202, b"", "application/json")
             return
         await _send_rpc(send, headers, reply)
 
     return app
+
+
+async def _off_loop(func: Callable, *args: Any) -> Any:
+    return await asyncio.get_running_loop().run_in_executor(_TOOL_EXECUTOR, func, *args)
+
+
+def _dispatch_batch(registry: Registry, payload: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [reply for reply in (handle_rpc(registry, item) for item in payload) if reply]
 
 
 async def _read_body(receive) -> bytes:

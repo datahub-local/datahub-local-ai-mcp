@@ -79,6 +79,13 @@ Server-specific logic stays in the server.
   where ~600 lines of prompt-policing regexes went, and they must not come back:
   a regex asserting a prompt contains the right English passes on the prompt
   that just failed.
+- **A tool call never runs on the event loop.** Tools block on synchronous HTTP,
+  so `/healthz` was answered only after the call finished: probes timed out for a
+  report's whole duration, which dropped the pod out of its Service (callers hung
+  until their own deadline, the `context deadline exceeded` they report) and past
+  the liveness threshold killed the call in flight. `server.py` dispatches
+  through one worker thread — one, not a pool, because the tools share the
+  snapshot directory and the serialization is what they assume.
 
 ## No data, ever
 
