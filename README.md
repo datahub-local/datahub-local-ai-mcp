@@ -3,13 +3,14 @@
 A platform for MCP servers: one shared runner, one directory per server, one
 image per server, and **no deployment's data in the repository**.
 
-Three servers ship today:
+Four servers ship today:
 
 | Server          | Tools | What it answers                                            | Data it needs mounted               |
 | --------------- | ----- | ---------------------------------------------------------- | ----------------------------------- |
 | `homelab_facts` | 18    | Cluster state: alerts, nodes, volumes, stores, certs, logs | chronic alerts + thresholds         |
 | `semantic`      | 5     | Metric definitions, and the SQL that computes them         | registry + dbt manifest (+ samples) |
 | `utils`         | 2     | The temp bucket: store a fetched file, sign a download URL | none — a bucket key in its env      |
+| `opencode`      | 7     | Run and poll tasks on the OpenCode coding agent            | none — the agent URL and password   |
 
 ## Why this exists
 
@@ -175,6 +176,7 @@ different cluster.
 | --------------- | ------------------------- | ---------------------------------------------------------- |
 | `homelab_facts` | `/etc/mcp/homelab_facts/` | `chronic_alerts.yaml`, `thresholds.yaml`                   |
 | `semantic`      | `/etc/mcp/semantic/`      | `registry.yaml`                                            |
+| `opencode`      | none                      | the server URL and Basic credential arrive as env vars     |
 
 Working examples, verified to load: [`deploy/examples/`](deploy/examples/).
 

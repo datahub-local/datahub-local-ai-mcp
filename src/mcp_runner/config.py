@@ -119,6 +119,17 @@ _TOOL_BUDGET_BASES: dict[str, int] = {
     "list_dimensions": 2048,
     "explain": 2048,
     "query": 4096,
+    # opencode - the agent's answer plus the files it changed; get_session is the
+    # same answer polled later, so it needs the same room.
+    "run_task": 6144,
+    "get_session": 6144,
+    "respond": 4096,
+    "abort_session": 4096,
+    # A patch is the artifact to review; a transcript is the fallback when the
+    # last answer is not enough. Both are cut by the runner when they run long.
+    "get_diff": 8192,
+    "list_sessions": 3072,
+    "get_transcript": 8192,
     # utils - one line of key=value pairs each. `temp_retrieve` carries a signed
     # URL, which is the longer of the two by an order of magnitude.
     "temp_store": 1024,
