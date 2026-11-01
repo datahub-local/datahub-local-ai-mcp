@@ -21,8 +21,12 @@ Targets the **OpenCode v2** HTTP API (`/api/session*`). The upstream
 OpenCode has no MCP server and Hermes is an MCP client. The shim is the smallest
 thing between them, and it holds **no state of its own**:
 
-- "One active session" is read from `GET /api/session/active`, never from memory, so
-  a shim restart cannot start a second writer.
+- Concurrency is read from `GET /api/session/active`, never from memory, so a shim
+  restart cannot start a second writer. `OPENCODE_MAX_CONCURRENT` (default 1) sets
+  how many turns may run at once; a session parked on a question does not count,
+  because it is idle in everything but the API's own label. Raising it needs a
+  directory per task, so two turns never share a checkout, and a matching resource
+  bump on the server Pod.
 - A turn is unbounded. `run_task` waits at most `wait_seconds` (default 120, max
   300) and then returns `running` with the session id; the session keeps going and
   `get_session` returns the result later.

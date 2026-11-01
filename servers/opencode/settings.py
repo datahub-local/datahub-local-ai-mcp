@@ -12,6 +12,8 @@ from mcp_runner.config import ConfigError, env, require_url
 
 DEFAULT_WAIT_SECONDS = 120
 MAX_WAIT_SECONDS = 300
+DEFAULT_MAX_CONCURRENT = 1
+MAX_CONCURRENT_CEILING = 8
 
 
 def server_url() -> str:
@@ -50,3 +52,19 @@ def wait_seconds(value: int | None) -> int:
     if value is None:
         return DEFAULT_WAIT_SECONDS
     return max(1, min(int(value), MAX_WAIT_SECONDS))
+
+
+def max_concurrent() -> int:
+    """How many turns may run at once, one by default.
+
+    Raising this is not free: the server Pod's CPU and memory limits are sized for
+    one turn, and sessions that share a checkout corrupt each other, so the caller
+    has to start each task with its own `directory`. The ceiling exists because a
+    typo should not turn one Pod into a fork bomb.
+    """
+    raw = env("OPENCODE_MAX_CONCURRENT", str(DEFAULT_MAX_CONCURRENT))
+    try:
+        value = int(raw or DEFAULT_MAX_CONCURRENT)
+    except ValueError:
+        raise ConfigError(f"OPENCODE_MAX_CONCURRENT must be an integer, got {raw!r}") from None
+    return max(1, min(value, MAX_CONCURRENT_CEILING))
