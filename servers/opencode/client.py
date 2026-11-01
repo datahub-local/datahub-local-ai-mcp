@@ -119,7 +119,9 @@ class OpenCodeClient:
             response = self._request(
                 "POST", f"/api/experimental/session/{session_id}/wait", timeout=timeout
             )
-        except httpx.TimeoutException:
+        except httpx.HTTPError:
+            # A reset or a timeout both mean "no answer before the budget", and the
+            # session read that follows decides what to report.
             return False
         # 503 is "no loop to wait on", which is the idle state as far as a caller is
         # concerned; the session read that follows decides the reported status.
