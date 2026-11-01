@@ -52,6 +52,86 @@ def _mock_idle_session(
     )
 
 
+def _mock_active(respx_mock, active, directories=None):
+    """The active list, with no pending input and a checkout per session."""
+    directories = directories or {}
+    respx_mock.get("http://opencode.test/api/session/active").mock(
+        return_value=httpx.Response(200, json={"data": active})
+    )
+    for session_id in active:
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}/form").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}/permission").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": session_id,
+                        "location": {"directory": directories.get(session_id, "/workspace")},
+                    }
+                },
+            )
+        )
+
+
+def _mock_prompt(respx_mock, waiting):
+    """`waiting` session has an open form; everyone else answers nothing."""
+    for session_id in {waiting, "ses_new", "ses_one"}:
+        forms = (
+            [{"id": "frm_1", "title": "Which repository?", "fields": []}]
+            if session_id == waiting
+            else []
+        )
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}/form").mock(
+            return_value=httpx.Response(200, json={"data": forms})
+        )
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}/permission").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+
+
+def _mock_turn_finishes(respx_mock, session_id):
+    """A new session that answers on the first prompt and ends idle."""
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/form").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/permission").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    respx_mock.post(f"http://opencode.test/api/session/{session_id}/prompt").mock(
+        return_value=httpx.Response(200, json={"data": {"id": "msg_1"}})
+    )
+    respx_mock.post(f"http://opencode.test/api/experimental/session/{session_id}/wait").mock(
+        return_value=httpx.Response(200, json={"data": {"idle": True}})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/diff").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}").mock(
+        return_value=httpx.Response(200, json={"data": {"id": session_id, "outcome": "succeeded"}})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/message").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "msg_1",
+                        "type": "assistant",
+                        "content": [{"type": "text", "text": "done"}],
+                    },
+                    {"id": "msg_2", "type": "idle", "outcome": "succeeded"},
+                ],
+                "cursor": {"previous": None, "next": None},
+            },
+        )
+    )
+
+
 class TestRunTask:
     def test_a_long_turn_returns_running_and_keeps_the_session(self, respx_mock):
         calls = {"n": 0}
@@ -90,9 +170,7 @@ class TestRunTask:
         assert wait.called
 
     def test_a_second_task_is_refused_before_a_session_is_created(self, respx_mock):
-        respx_mock.get("http://opencode.test/api/session/active").mock(
-            return_value=httpx.Response(200, json={"data": {"ses_busy": {"type": "running"}}})
-        )
+        _mock_active(respx_mock, {"ses_busy": {"type": "running"}})
         create = respx_mock.post("http://opencode.test/api/session").mock(
             return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
         )
@@ -102,6 +180,86 @@ class TestRunTask:
         assert "status: busy" in out
         assert "session: ses_busy" in out
         assert not create.called
+
+    def test_a_parked_session_does_not_consume_the_only_slot(self, respx_mock):
+        _mock_active(respx_mock, {"ses_waiting": {"type": "running"}})
+        _mock_prompt(respx_mock, waiting="ses_waiting")
+        create = respx_mock.post("http://opencode.test/api/session").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
+        )
+        _mock_turn_finishes(respx_mock, "ses_new")
+
+        out = tools.run_task("do it while the owner thinks")
+
+        assert "status: idle" in out
+        assert "session: ses_new" in out
+        assert create.called
+
+    def test_capacity_is_the_configured_limit(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "2")
+        _mock_active(respx_mock, {"ses_one": {"type": "running"}, "ses_two": {"type": "running"}})
+        create = respx_mock.post("http://opencode.test/api/session").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
+        )
+
+        out = tools.run_task("third task")
+
+        assert "status: busy" in out
+        assert "2 of 2 slots in use" in out
+        assert not create.called
+
+    def test_a_second_slot_is_used_when_the_limit_allows_it(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "2")
+        _mock_active(respx_mock, {"ses_one": {"type": "running"}})
+        create = respx_mock.post("http://opencode.test/api/session").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
+        )
+        _mock_turn_finishes(respx_mock, "ses_new")
+
+        out = tools.run_task("second task", directory="issue-117")
+
+        assert "status: idle" in out
+        assert create.called
+
+    def test_two_turns_in_one_checkout_are_refused_whatever_the_limit(
+        self, respx_mock, monkeypatch
+    ):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "4")
+        _mock_active(respx_mock, {"ses_one": {"type": "running"}}, {"ses_one": "/workspace"})
+        create = respx_mock.post("http://opencode.test/api/session").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
+        )
+
+        out = tools.run_task("same checkout")
+
+        assert "status: busy" in out
+        assert not create.called
+
+    def test_a_second_checkout_runs_alongside(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "4")
+        _mock_active(
+            respx_mock, {"ses_one": {"type": "running"}}, {"ses_one": "/workspace/datahub-local"}
+        )
+        create = respx_mock.post("http://opencode.test/api/session").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_new"}})
+        )
+        _mock_turn_finishes(respx_mock, "ses_new")
+
+        out = tools.run_task("other repo", directory="datahub-local-core")
+
+        assert "status: idle" in out
+        assert create.called
+
+    def test_continuing_a_running_session_is_refused(self, respx_mock):
+        _mock_active(respx_mock, {"ses_one": {"type": "running"}})
+        prompt = respx_mock.post("http://opencode.test/api/session/ses_one/prompt").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "msg_1"}})
+        )
+
+        out = tools.run_task("more work", session_id="ses_one")
+
+        assert "status: busy" in out
+        assert not prompt.called
 
     def test_a_directory_that_escapes_the_workspace_sends_nothing(self, respx_mock):
         out = tools.run_task("escape", directory="../../etc")

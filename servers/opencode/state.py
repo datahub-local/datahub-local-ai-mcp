@@ -109,6 +109,27 @@ def read(client: OpenCodeClient, session_id: str) -> Status:
     return status
 
 
+def working(client: OpenCodeClient) -> dict[str, str]:
+    """Turns in progress, keyed by session, valued by their checkout directory.
+
+    `/api/session/active` reports a session waiting for an answer as running, and
+    it is idle in every way that matters here: no CPU, no progress, no end. If it
+    consumed a concurrency slot, one question would stop the whole queue until the
+    owner replied.
+
+    The directory comes from the session itself, not from the caller, because two
+    turns in one checkout is the one state that must never be allowed: both would
+    write the same files.
+    """
+    busy: dict[str, str] = {}
+    for session_id in client.active() or {}:
+        if client.forms(session_id) or client.permissions(session_id):
+            continue
+        session = client.get_session(session_id) or {}
+        busy[session_id] = ((session.get("location") or {}).get("directory") or "").rstrip("/")
+    return busy
+
+
 def render(status: Status) -> str:
     """Compact, line-oriented text: a model copies rows, it does not parse prose."""
     lines = [f"session: {status.session_id}", f"status: {status.state}"]
@@ -151,12 +172,13 @@ def render(status: Status) -> str:
     return "\n".join(lines)
 
 
-def render_busy(active: dict, requested: str | None = None) -> str:
+def render_busy(active: dict, requested: str | None = None, limit: int | None = None) -> str:
     session_id = requested if requested in active else next(iter(active), "unknown")
+    slots = f" ({len(active)} of {limit} slots in use)" if limit else ""
     return "\n".join(
         [
             f"session: {session_id}",
             "status: busy",
-            "another turn is running; poll get_session, or abort_session to stop it",
+            f"another turn is running{slots}; poll get_session, or abort_session to stop it",
         ]
     )

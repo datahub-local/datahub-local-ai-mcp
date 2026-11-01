@@ -16,15 +16,18 @@ from pathlib import Path
 
 from . import settings
 from .client import OpenCodeClient, OpenCodeError, SessionBusy
-from .state import read, render, render_busy
+from .state import read, render, render_busy, working
 
 RUN_TASK_DESCRIPTION = """
 Start a task in the OpenCode agent and wait up to `wait_seconds` for it to finish.
 Returns `running` with the session id when the turn outlives the wait; the session
-keeps running, and `get_session` returns the result later. Returns `busy` while
-another session is active: only one turn runs at a time. `directory` is relative to
-`/workspace`; omit it to work in the workspace root. Pass `session_id` to continue
-an idle session instead of starting a new one.
+keeps running, and `get_session` returns the result later. Returns `busy` when the
+configured number of turns is already running, or when this session is one of them.
+A session parked on a question does not count, so asking the owner never stops the
+queue. Two turns in the same directory are always refused, whatever the limit. So a
+task that should run alongside another needs its own `directory`, relative to
+`/workspace`; omit it to work in the workspace root. Pass `session_id` to
+continue an idle session instead of starting a new one.
 """
 
 RUN_TASK_SCHEMA = {
@@ -213,9 +216,21 @@ def run_task(
         return f"ERROR: {exc}"
 
     with OpenCodeClient() as client:
-        active = client.active()
-        if active:
-            return render_busy(active, session_id)
+        try:
+            running = working(client)
+        except OpenCodeError as exc:
+            return f"ERROR: {exc}"
+
+        limit = settings.max_concurrent()
+        if session_id and session_id in running:
+            return render_busy({session_id: running[session_id]}, session_id, limit)
+        if not session_id:
+            checkout = (target or settings.workspace_root()).rstrip("/")
+            clash = {sid: d for sid, d in running.items() if d == checkout}
+            if clash:
+                return render_busy(clash, None, limit)
+        if len(running) >= limit:
+            return render_busy(running, session_id, limit)
 
         try:
             if session_id:
@@ -228,7 +243,7 @@ def run_task(
             try:
                 client.prompt(sid, prompt, timeout=wait)
             except SessionBusy as exc:
-                return render_busy({exc.session_id: {"type": "running"}}, exc.session_id)
+                return render_busy({exc.session_id: {"type": "running"}}, exc.session_id, limit)
 
             remaining = deadline - time.monotonic()
             if remaining > 0 and sid in client.active():
