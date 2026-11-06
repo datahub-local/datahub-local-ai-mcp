@@ -222,20 +222,31 @@ def run_task(
             return f"ERROR: {exc}"
 
         limit = settings.max_concurrent()
-        if session_id and session_id in running:
-            return render_busy({session_id: running[session_id]}, session_id, limit)
-        if not session_id:
+        resumed = None
+        if session_id:
+            if session_id in running:
+                return render_busy({session_id: running[session_id]}, session_id, limit)
+            try:
+                resumed = client.get_session(session_id)
+            except OpenCodeError as exc:
+                return f"ERROR: {exc}"
+            if resumed is None:
+                return f"ERROR: no session {session_id}"
+            # Resuming must not skip the one rule that keeps checkouts intact: the
+            # directory comes from the session, not from the caller, because the
+            # caller does not pass one when it continues a session.
+            checkout = ((resumed.get("location") or {}).get("directory") or "").rstrip("/")
+        else:
             checkout = (target or settings.workspace_root()).rstrip("/")
-            clash = {sid: d for sid, d in running.items() if d == checkout}
-            if clash:
-                return render_busy(clash, None, limit)
+
+        clash = {sid: d for sid, d in running.items() if d and d == checkout}
+        if clash:
+            return render_busy(clash, session_id, limit)
         if len(running) >= limit:
             return render_busy(running, session_id, limit)
 
         try:
             if session_id:
-                if client.get_session(session_id) is None:
-                    return f"ERROR: no session {session_id}"
                 sid = session_id
             else:
                 sid = client.create_session(directory=target)["id"]

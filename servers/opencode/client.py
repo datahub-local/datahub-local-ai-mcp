@@ -119,7 +119,9 @@ class OpenCodeClient:
             response = self._request(
                 "POST", f"/api/experimental/session/{session_id}/wait", timeout=timeout
             )
-        except httpx.TimeoutException:
+        except httpx.HTTPError:
+            # A reset or a timeout both mean "no answer before the budget", and the
+            # session read that follows decides what to report.
             return False
         # 503 is "no loop to wait on", which is the idle state as far as a caller is
         # concerned; the session read that follows decides the reported status.
@@ -138,10 +140,16 @@ class OpenCodeClient:
         return bool((response.json() or {}).get("interrupted"))
 
     def messages(self, session_id: str) -> list[dict]:
+        """The newest page of messages, returned oldest-first for reading.
+
+        The endpoint lists newest first and `state` walks the list backwards to
+        find the latest answer. Leaving the page in API order makes every read
+        report the oldest assistant text in it, which is the previous turn.
+        """
         response = self._request("GET", f"/api/session/{session_id}/message")
         if response.status_code >= 400:
             self._fail(response, session_id)
-        return self._data(response) or []
+        return list(reversed(self._data(response) or []))
 
     def session_list(self, limit: int = 10, search: str | None = None) -> list[dict]:
         params: dict[str, str] = {"limit": str(limit), "order": "desc"}

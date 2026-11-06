@@ -94,6 +94,36 @@ def _mock_prompt(respx_mock, waiting):
         )
 
 
+def _mock_turn_ends(respx_mock, session_id):
+    """The tail of a turn for a session whose earlier requests are already mocked."""
+    for kind in ("form", "permission"):
+        respx_mock.get(f"http://opencode.test/api/session/{session_id}/{kind}").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+    respx_mock.post(f"http://opencode.test/api/experimental/session/{session_id}/wait").mock(
+        return_value=httpx.Response(200, json={"data": {"idle": True}})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/diff").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    respx_mock.get(f"http://opencode.test/api/session/{session_id}/message").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "id": "msg_1",
+                        "type": "assistant",
+                        "content": [{"type": "text", "text": "ok"}],
+                    },
+                    {"id": "msg_2", "type": "idle", "outcome": "succeeded"},
+                ],
+                "cursor": {"previous": None, "next": None},
+            },
+        )
+    )
+
+
 def _mock_turn_finishes(respx_mock, session_id):
     """A new session that answers on the first prompt and ends idle."""
     respx_mock.get(f"http://opencode.test/api/session/{session_id}/form").mock(
@@ -250,6 +280,61 @@ class TestRunTask:
         assert "status: idle" in out
         assert create.called
 
+    def test_resuming_a_session_in_a_busy_checkout_is_refused(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "4")
+        _mock_active(
+            respx_mock,
+            {"ses_other": {"type": "running"}},
+            {"ses_other": "/workspace/datahub-local"},
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_mine").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": "ses_mine",
+                        "location": {"directory": "/workspace/datahub-local"},
+                    }
+                },
+            )
+        )
+        prompt = respx_mock.post("http://opencode.test/api/session/ses_mine/prompt").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "msg_1"}})
+        )
+
+        out = tools.run_task("continue", session_id="ses_mine")
+
+        assert "status: busy" in out
+        assert not prompt.called
+
+    def test_resuming_a_session_in_a_free_checkout_is_allowed(self, respx_mock, monkeypatch):
+        monkeypatch.setenv("OPENCODE_MAX_CONCURRENT", "4")
+        _mock_active(
+            respx_mock,
+            {"ses_other": {"type": "running"}},
+            {"ses_other": "/workspace/datahub-local-core"},
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_mine").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "id": "ses_mine",
+                        "location": {"directory": "/workspace/datahub-local"},
+                    }
+                },
+            )
+        )
+        prompt = respx_mock.post("http://opencode.test/api/session/ses_mine/prompt").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "msg_1"}})
+        )
+        _mock_turn_ends(respx_mock, "ses_mine")
+
+        out = tools.run_task("continue", session_id="ses_mine")
+
+        assert "session: ses_mine" in out
+        assert prompt.called
+
     def test_continuing_a_running_session_is_refused(self, respx_mock):
         _mock_active(respx_mock, {"ses_one": {"type": "running"}})
         prompt = respx_mock.post("http://opencode.test/api/session/ses_one/prompt").mock(
@@ -359,6 +444,51 @@ class TestGetSession:
         assert "status: needs_input" in out
         assert "form: frm_1" in out
         assert "Which branch?" in out
+
+    def test_the_newest_answer_wins_when_the_page_is_newest_first(self, respx_mock):
+        """The API lists newest first; reading it left-to-right reports a stale turn."""
+        respx_mock.get("http://opencode.test/api/session/ses_x/form").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/permission").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/active").mock(
+            return_value=httpx.Response(200, json={"data": {}})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_x", "outcome": "succeeded"}})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/diff").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/message").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "msg_4", "type": "idle", "outcome": "succeeded"},
+                        {
+                            "id": "msg_3",
+                            "type": "assistant",
+                            "content": [{"type": "text", "text": "BLOCKED: wait for the merge"}],
+                        },
+                        {"id": "msg_2", "type": "user", "text": "run the tests"},
+                        {
+                            "id": "msg_1",
+                            "type": "assistant",
+                            "content": [{"type": "text", "text": "DONE: previous turn"}],
+                        },
+                    ],
+                    "cursor": {"previous": None, "next": None},
+                },
+            )
+        )
+
+        out = tools.get_session("ses_x")
+
+        assert "BLOCKED: wait for the merge" in out
+        assert "DONE: previous turn" not in out
 
 
 class TestRespond:
