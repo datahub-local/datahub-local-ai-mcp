@@ -445,6 +445,51 @@ class TestGetSession:
         assert "form: frm_1" in out
         assert "Which branch?" in out
 
+    def test_the_newest_answer_wins_when_the_page_is_newest_first(self, respx_mock):
+        """The API lists newest first; reading it left-to-right reports a stale turn."""
+        respx_mock.get("http://opencode.test/api/session/ses_x/form").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/permission").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/active").mock(
+            return_value=httpx.Response(200, json={"data": {}})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x").mock(
+            return_value=httpx.Response(200, json={"data": {"id": "ses_x", "outcome": "succeeded"}})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/diff").mock(
+            return_value=httpx.Response(200, json={"data": []})
+        )
+        respx_mock.get("http://opencode.test/api/session/ses_x/message").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"id": "msg_4", "type": "idle", "outcome": "succeeded"},
+                        {
+                            "id": "msg_3",
+                            "type": "assistant",
+                            "content": [{"type": "text", "text": "BLOCKED: wait for the merge"}],
+                        },
+                        {"id": "msg_2", "type": "user", "text": "run the tests"},
+                        {
+                            "id": "msg_1",
+                            "type": "assistant",
+                            "content": [{"type": "text", "text": "DONE: previous turn"}],
+                        },
+                    ],
+                    "cursor": {"previous": None, "next": None},
+                },
+            )
+        )
+
+        out = tools.get_session("ses_x")
+
+        assert "BLOCKED: wait for the merge" in out
+        assert "DONE: previous turn" not in out
+
 
 class TestRespond:
     def test_a_single_field_form_is_mapped_by_its_key(self, respx_mock):
