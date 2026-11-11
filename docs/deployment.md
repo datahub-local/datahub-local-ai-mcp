@@ -43,9 +43,8 @@ per-server `timeout`, and the Pod probe that decides whether the process survive
 The rule is **server-internal < `MCPServer.spec.timeout` < Hermes client**, with at
 least 10s of headroom at each step. A server with no internal HTTP ceiling is
 bounded by its bridge. Hermes connects directly and does not see the catalog
-value; the bridge is what Sympozium agents get. `opencode` is the one equality:
-both ceilings are 900 because the shim's own turn ceiling is 300, so neither
-bounds a real turn.
+value; the bridge is what Sympozium agents get. `opencode` pairs a 600s bridge
+with a 900s client because the shim's own `run_task` wait budget is 300s.
 
 These are the effective values in this homelab. The sources are
 `datahub-local-core/releases/automation/values/{mcp,hermes,opencode}.yaml.gotmpl`
@@ -63,16 +62,17 @@ servers this repository owns.
 | `slack` | none | 30 | 60 | controller default |
 | `trino` | 30 | 60 | 120 | readiness TCP 5s; liveness TCP 15s |
 | `firecrawl` | Firecrawl API default | 60 | 300 | readiness `/health` 5s; liveness `/health` 15s |
-| `n8n` | none | not catalogued | 60 | readiness and liveness `/health` 10s |
-| `opencode` | 20 per HTTP call; 300 per `run_task` wait | 900 | 900 | readiness `/healthz` 10s; liveness `/healthz` 30s |
+| `n8n` | none | not catalogued | 60 | readiness `/health` 10s; liveness `/health` 15s |
+| `opencode` | 20 per HTTP call; 300 per `run_task` wait | 600 | 900 | readiness `/healthz` 10s; liveness `/healthz` 30s |
 | `homelab-facts` | Prometheus 20, Loki 20, Garage 10 | 60 | not registered | liveness `/healthz` 30s, 10s timeout, 6 failures; readiness 10s |
 | `semantic` | Trino 30 | 60 | not registered | as `homelab-facts` |
 | `semantic-finance` | Trino 30 | 60 | not registered | as `homelab-facts` |
 | `utils` | fetch 120 | 130 | not registered | as `homelab-facts` |
 
 `controller default` is the Sympozium controller's probe on a managed stdio
-`MCPServer`: liveness `/healthz` every 15s, 5s timeout, 5 failures, 30s initial
-delay; readiness `/readyz` every 10s, 5s timeout, 5 failures, 20s initial delay.
+`MCPServer`, read from the live Deployments on 2026-11-11: liveness `/healthz`
+every 15s, 5s timeout, 5 failures, 30s initial delay; readiness `/readyz` every
+10s, 5s timeout, 5 failures, 20s initial delay.
 
 Three cases are recorded here because the numbers alone mislead:
 
