@@ -35,6 +35,67 @@ rendering as an absent one, which is the failure hardest to see. Garage is the
 exception: its absence is a designed state, so it returns `None` and the caller
 says `unavailable`.
 
+## Timeouts
+
+Four ceilings bound one tool call: the server's own backend timeout, the
+`MCPServer.spec.timeout` the Sympozium catalog bridge applies, the Hermes client's
+per-server `timeout`, and the Pod probe that decides whether the process survives.
+The rule is **server-internal < `MCPServer.spec.timeout` < Hermes client**, with at
+least 10s of headroom at each step. A server with no internal HTTP ceiling is
+bounded by its bridge. Hermes connects directly and does not see the catalog
+value; the bridge is what Sympozium agents get. `opencode` is the one equality:
+both ceilings are 900 because the shim's own turn ceiling is 300, so neither
+bounds a real turn.
+
+These are the effective values in this homelab. The sources are
+`datahub-local-core/releases/automation/values/{mcp,hermes,opencode}.yaml.gotmpl`
+for the catalog, the gateway and OpenCode, and
+`datahub-local-ai/agents/sympozium/values/default.yaml.gotmpl` for the four
+servers this repository owns.
+
+| Server | Server-internal | `spec.timeout` | Hermes `timeout` | Pod probe |
+| --- | --- | --- | --- | --- |
+| `k8s` | none | 30 | 60 | readiness `/healthz` 5s |
+| `github` | none | 30 | 60 | readiness `/healthz` 5s; liveness TCP 30s |
+| `grafana` | none | 30 | 60 | controller default |
+| `postgres` | none | 60 | 120 | controller default; see below |
+| `argocd` | none | 30 | 60 | controller default |
+| `slack` | none | 30 | 60 | controller default |
+| `trino` | 30 | 60 | 120 | readiness TCP 5s; liveness TCP 15s |
+| `firecrawl` | Firecrawl API default | 60 | 300 | readiness `/health` 5s; liveness `/health` 15s |
+| `n8n` | none | not catalogued | 60 | readiness and liveness `/health` 10s |
+| `opencode` | 20 per HTTP call; 300 per `run_task` wait | 900 | 900 | readiness `/healthz` 10s; liveness `/healthz` 30s |
+| `homelab-facts` | Prometheus 20, Loki 20, Garage 10 | 60 | not registered | liveness `/healthz` 30s, 10s timeout, 6 failures; readiness 10s |
+| `semantic` | Trino 30 | 60 | not registered | as `homelab-facts` |
+| `semantic-finance` | Trino 30 | 60 | not registered | as `homelab-facts` |
+| `utils` | fetch 120 | 130 | not registered | as `homelab-facts` |
+
+`controller default` is the Sympozium controller's probe on a managed stdio
+`MCPServer`: liveness `/healthz` every 15s, 5s timeout, 5 failures, 30s initial
+delay; readiness `/readyz` every 10s, 5s timeout, 5 failures, 20s initial delay.
+
+Three cases are recorded here because the numbers alone mislead:
+
+- **firecrawl's 300s timeouts were not a short timeout.** On 2026-10-31 two
+  `firecrawl_scrape` calls ended at exactly 300s while the same server's
+  keepalive failed. The stdio bridge shared one child across callers and misaligned
+  Firecrawl's replies; the stateless HTTP transport removed the hang on 2026-11-02.
+  Raising the client would only have made each failure slower. The 300s value stays
+  explicit, above the 60s bridge, because the Firecrawl API can legitimately run
+  past the bridge. Its `keepalive_interval: 3600` stays too: the stateless
+  transport has no session to refresh and closes the GET event stream, so the
+  default 180s probe would tear the transport down mid-call.
+- **postgres' park loop was not a tool timeout.** The stdio adapter shares one
+  child with `/healthz`, so a request sent before `initialize` blocked the health
+  handler; the liveness probe killed the container after its 30s initial delay
+  plus five 15s periods. The CRD exposes no probe fields, so these numbers are the
+  controller's and cannot be sized from any repository here. Widening the Hermes
+  timeout would have changed nothing.
+- **`utils`' 120s fetch belongs to n8n, not the catalog.** n8n calls the Service
+  directly for `temp_store`; no agent mounts it. Its bridge is 130s so the rule
+  holds for any future catalog caller, and a slow fetch of a rendered video is not
+  cut short.
+
 Two wiring rules for the Garage secret, both learned the hard way:
 
 - make the refs `optional: true` — an unresolvable `secretKeyRef` holds the pod
