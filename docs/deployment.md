@@ -37,11 +37,14 @@ says `unavailable`.
 
 ## Timeouts
 
-Four ceilings bound one tool call: the server's own backend timeout, the
-`MCPServer.spec.timeout` the Sympozium catalog bridge applies, the Hermes client's
-per-server `timeout`, and the Pod probe that decides whether the process survives.
-The rule is **server-internal < `MCPServer.spec.timeout` < Hermes client**, with at
-least 10s of headroom at each step. A server with no internal HTTP ceiling is
+Four ceilings bound one tool call: the server's own backend timeout, the bridge
+timeout the Sympozium controller applies, the Hermes client's per-server `timeout`,
+and the Pod probe that decides whether the process survives. The bridge value is
+the persona's `mcpServers[].timeout`; `MCPServer.spec.timeout` is inherited only
+when that entry omits one (`resolveMCPServerURLs`, v0.13.0), so a catalog value
+alone cannot bound an agent. The rule is **server-internal < bridge < Hermes
+client**, with at least 10s of headroom at each step, and the bridge must also sit
+10s above the tool's measured p-max. A server with no internal HTTP ceiling is
 bounded by its bridge. Hermes connects directly and does not see the catalog
 value; the bridge is what Sympozium agents get. `opencode` pairs a 600s bridge
 with a 900s client because the shim's own `run_task` wait budget is 300s.
@@ -50,7 +53,8 @@ These are the effective values in this homelab. The sources are
 `datahub-local-core/releases/automation/values/{mcp,hermes,opencode}.yaml.gotmpl`
 for the catalog, the gateway and OpenCode, and
 `datahub-local-ai/agents/sympozium/values/default.yaml.gotmpl` for the four
-servers this repository owns.
+servers this repository owns; the personas that mount them state the same value in
+`agents/sympozium/projects/*/agents/*.yaml`.
 
 | Server | Server-internal | `spec.timeout` | Hermes `timeout` | Pod probe |
 | --- | --- | --- | --- | --- |
@@ -64,10 +68,20 @@ servers this repository owns.
 | `firecrawl` | Firecrawl API default | 60 | 300 | readiness `/health` 5s; liveness `/health` 15s |
 | `n8n` | none | not catalogued | 60 | readiness `/health` 10s; liveness `/health` 15s |
 | `opencode` | 20 per HTTP call; 300 per `run_task` wait | 600 | 900 | readiness `/healthz` 10s; liveness `/healthz` 30s |
-| `homelab-facts` | Prometheus 20, Loki 20, Garage 10 | 60 | not registered | liveness `/healthz` 30s, 10s timeout, 6 failures; readiness 10s |
+| `homelab-facts` | Kubernetes lists unbounded; Prometheus 20, Loki 20, Garage 10 | 90 | not registered | liveness `/healthz` 30s, 10s timeout, 6 failures; readiness 10s |
 | `semantic` | Trino 30 | 60 | not registered | as `homelab-facts` |
 | `semantic-finance` | Trino 30 | 60 | not registered | as `homelab-facts` |
 | `utils` | fetch 120 | 130 | not registered | as `homelab-facts` |
+
+`homelab-facts` is 90, not 60. Its name-resolving tools list up to thirteen kinds
+from the Kubernetes API; measured on 2026-11-14 at a 180s client ceiling,
+`find_object` was 35.6s p50 and 40.7s max, `logs` 33.4 and 52.3, `why_failed` 42.8
+and 60.2 over 22 calls. The 20s Prometheus and Loki ceilings do not bind those
+calls: none of the three queries Prometheus, and Loki appears only on fallback,
+where `why_failed` on a Job reached 60.2s. The server also runs every JSON-RPC
+request on one worker, so a call the bridge abandons keeps the worker and a retry
+measured 64.9s. 90s covers the measured p-max with 29.8s of headroom; shortening
+the fan-out or widening the executor is a separate server change.
 
 `controller default` is the Sympozium controller's probe on a managed stdio
 `MCPServer`, read from the live Deployments on 2026-11-11: liveness `/healthz`
